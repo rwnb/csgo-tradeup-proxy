@@ -1,0 +1,33 @@
+server:
+  port: ${SERVER_PORT:8092}
+
+spring:
+  application:
+    name: csgo-tradeup-proxy
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/csgo_tradeup_proxy?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:csgo_tradeup_proxy}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    initialization-mode: never
+  flyway:
+    enabled: false
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6379}
+    database: ${REDIS_DATABASE:2}
+    password: ${REDIS_PASSWORD:}
+    timeout: 3s
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+        max-wait: 3s
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+tradeup:
+  swagger-enabled: ${SWAGGER_ENABLED:false}
