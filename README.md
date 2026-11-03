@@ -51,7 +51,7 @@ Docker 使用 JDK 17 多阶段构建，并以非 root 用户运行。`.dockerign
 
 GitHub 网页手动构建：在仓库的 Settings → Secrets and variables → Actions 中配置变量 `DOCKERHUB_USERNAME`（Docker Hub 用户名，不是邮箱）和 secret `DOCKERHUB_TOKEN`（建议使用 Docker Hub 访问令牌）。之后在 Actions → “构建并推送 Docker 镜像” → Run workflow 点击运行。每次先运行测试，再构建并推送 `linux/amd64` 镜像；镜像标签在运行结果的 Summary 中显示。该工作流不负责部署或重启服务器。
 
-在服务器首次部署前，准备仓库文件和 `.env`，在 Docker Hub 登录具有私有镜像拉取权限的账号，配置 `STEAM_INTERNAL_KEY`（至少 32 位字母数字，可使用 `openssl rand -hex 32` 生成）、IPWO 和必要的其他环境变量。Docker 容器内的 `127.0.0.1` 指容器自身，不是服务器宿主机；如使用宿主机的数据库或 Redis，必须填写容器可访问的地址。环境文件建议设置为 `chmod 600 .env`。
+首次部署时，如 `.env` 不存在，脚本使用 `.env.example` 创建权限受限的文件并生成随机 `STEAM_INTERNAL_KEY`；不会覆盖已有配置。国内后端的 `STEAM_PROXY_INTERNAL_KEY` 必须与这个值一致。服务器还需登录有私有镜像拉取权限的 Docker Hub 账号。Docker 容器内的 `127.0.0.1` 指容器自身，不是服务器宿主机；如使用宿主机的数据库或 Redis，必须填写容器可访问的地址。
 
 ```bash
 ./scripts/deploy.sh 15565780467w/csgo-tradeup-proxy:run-运行ID-次数
