@@ -1,0 +1,10 @@
+services:
+  proxy:
+    image: ${PROXY_IMAGE:?请指定镜像地址}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVER_PORT: '8092'
+    ports:
+      - '127.0.0.1:8092:8092'
