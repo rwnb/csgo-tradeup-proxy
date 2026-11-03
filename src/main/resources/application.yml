@@ -33,7 +33,7 @@ tradeup:
   swagger-enabled: ${SWAGGER_ENABLED:false}
 
 steam:
-  internal-key: ${STEAM_INTERNAL_KEY:}
+  internal-key: ${STEAM_INTERNAL_KEY:csgoTradeupProxyTestOnly20261103SharedKeyNotForProduction}
   community:
     proxy:
       host: ${STEAM_COMMUNITY_PROXY_HOST:us.ipwo.net}

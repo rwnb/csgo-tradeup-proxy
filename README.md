@@ -11,9 +11,9 @@
 - Swagger 开关、控制台及按天滚动日志、环境变量配置。
 - `GET /health` 进程存活接口。
 
-Steam 内部接口使用独立服务密钥，未配置或密钥不足 32 字节时拒绝访问。账号权限和凭据密文仍由原后端管理；本服务中的 Steam 会话与未确认事件仅保存在内存，原后端停止轮询后约 45 秒关闭会话。服务重启会丢失会话，需要重新登录。库存接口按 appId、contextId 和游标返回单页，调用方负责处理分页和失败。
+Steam 内部接口使用服务密钥，密钥不足 32 字节时拒绝访问。项目包含公开的测试密钥，不能用于保护生产服务。账号权限和凭据密文仍由原后端管理；本服务中的 Steam 会话与未确认事件仅保存在内存，原后端停止轮询后约 45 秒关闭会话。服务重启会丢失会话，需要重新登录。库存接口按 appId、contextId 和游标返回单页，调用方负责处理分页和失败。
 
-跨公网部署时必须在服务前配置 HTTPS，使用受信任的证书，并限制 8092 仅能被反向代理或可信网络访问；不要将明文内部端口暴露公网。设置 `STEAM_INTERNAL_KEY` 为至少 32 字节的随机值，与后端 `STEAM_PROXY_INTERNAL_KEY` 相同。IPWO 默认配置已写入项目，可用 `STEAM_COMMUNITY_PROXY_HOST`、`STEAM_COMMUNITY_PROXY_PORT`、`STEAM_COMMUNITY_PROXY_USERNAME`、`STEAM_COMMUNITY_PROXY_PASSWORD` 覆盖；这些配置只用于 Community 请求，不作用于 Steam CM 登录连接。此仓库公开，IPWO 默认凭据对所有人可见。服务间密钥和 Steam 账号凭据不要写入仓库、访问日志或反向代理请求体日志。两个服务器应同步系统时间。
+跨公网部署时必须在服务前配置 HTTPS，使用受信任的证书，并限制 8092 仅能被反向代理或可信网络访问；不要将明文内部端口暴露公网。项目中内置公开的测试密钥，与后端默认测试密钥一致；正式使用必须分别设置相同的随机 `STEAM_INTERNAL_KEY` 和 `STEAM_PROXY_INTERNAL_KEY`。IPWO 默认配置已写入项目，可用 `STEAM_COMMUNITY_PROXY_HOST`、`STEAM_COMMUNITY_PROXY_PORT`、`STEAM_COMMUNITY_PROXY_USERNAME`、`STEAM_COMMUNITY_PROXY_PASSWORD` 覆盖；这些配置只用于 Community 请求，不作用于 Steam CM 登录连接。此仓库公开，IPWO 默认凭据和测试密钥对所有人可见。Steam 账号凭据不要写入仓库、访问日志或反向代理请求体日志。两个服务器应同步系统时间。
 
 库存、交易链接及服务间链路上线前需要在目标服务器验证，尤其是 IPWO 的代理协议与认证配置。默认使用项目中的 IPWO 配置。
 
@@ -47,11 +47,11 @@ set +a
 java -jar target/csgo-tradeup-proxy.jar
 ```
 
-Docker 使用 JDK 17 多阶段构建，并以非 root 用户运行。`.dockerignore` 排除了本机 `.env`、日志和构建产物；实际密钥由服务器上的环境文件提供，文件权限应限制为部署用户可读。
+Docker 使用 JDK 17 多阶段构建，并以非 root 用户运行。`.dockerignore` 排除了本机 `.env`、日志和构建产物；项目中的公开测试配置仍会打入镜像。正式环境的私有配置应由服务器环境文件覆盖，并限制文件权限。
 
 GitHub 网页手动构建：在仓库的 Settings → Secrets and variables → Actions 中配置变量 `DOCKERHUB_USERNAME`（Docker Hub 用户名，不是邮箱）和 secret `DOCKERHUB_TOKEN`（建议使用 Docker Hub 访问令牌）。之后在 Actions → “构建并推送 Docker 镜像” → Run workflow 点击运行。每次先运行测试，再构建并推送 `linux/amd64` 镜像；镜像标签在运行结果的 Summary 中显示。该工作流不负责部署或重启服务器。
 
-首次部署时，如 `.env` 不存在，脚本使用 `.env.example` 创建权限受限的文件并生成随机 `STEAM_INTERNAL_KEY`；不会覆盖已有配置。国内后端的 `STEAM_PROXY_INTERNAL_KEY` 必须与这个值一致。服务器还需登录有私有镜像拉取权限的 Docker Hub 账号。Docker 容器内的 `127.0.0.1` 指容器自身，不是服务器宿主机；如使用宿主机的数据库或 Redis，必须填写容器可访问的地址。
+首次部署时，如 `.env` 不存在，脚本使用 `.env.example` 创建权限受限的文件并使用项目测试配置；不会覆盖已有配置。国内后端默认使用同一测试密钥。服务器还需登录有私有镜像拉取权限的 Docker Hub 账号。Docker 容器内的 `127.0.0.1` 指容器自身，不是服务器宿主机；如使用宿主机的数据库或 Redis，必须填写容器可访问的地址。
 
 ```bash
 ./scripts/deploy.sh 15565780467w/csgo-tradeup-proxy:run-运行ID-次数

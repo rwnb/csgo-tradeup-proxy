@@ -8,16 +8,14 @@ if [[ ! "$image" =~ ^15565780467w/csgo-tradeup-proxy:run-[0-9]+-[0-9]+$ ]]; then
   exit 2
 fi
 if [[ ! -f .env ]]; then
-  if [[ ! -f .env.example ]] || ! command -v openssl >/dev/null 2>&1; then
-    printf '自动创建 .env 需要 .env.example 和 openssl。\n' >&2
+  if [[ ! -f .env.example ]]; then
+    printf '自动创建 .env 需要 .env.example。\n' >&2
     exit 1
   fi
   umask 077
-  service_key="$(openssl rand -hex 32)"
-  # noclobber prevents overwriting an .env created by another deployment.
-  (set -o noclobber; sed "s/^STEAM_INTERNAL_KEY=$/STEAM_INTERNAL_KEY=${service_key}/" .env.example > .env)
-  unset service_key
-  printf '已自动创建 .env 和服务密钥；国内后端需要配置相同的服务密钥。\n'
+  # Do not overwrite an existing .env, including one created concurrently.
+  cp -n .env.example .env
+  printf '已自动创建 .env，使用项目中的测试配置。\n'
 fi
 if ! command -v curl >/dev/null 2>&1; then
   printf '缺少 curl，无法验证健康检查。\n' >&2
