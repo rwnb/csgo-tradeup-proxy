@@ -38,5 +38,5 @@ steam:
     proxy:
       host: ${STEAM_COMMUNITY_PROXY_HOST:us.ipwo.net}
       port: ${STEAM_COMMUNITY_PROXY_PORT:7878}
-      username: ${STEAM_COMMUNITY_PROXY_USERNAME:steam411303}
+      username: ${STEAM_COMMUNITY_PROXY_USERNAME:steam411303_custom_zone_GLOBAL_sid_81972879_time_10}
       password: ${STEAM_COMMUNITY_PROXY_PASSWORD:steam411303}
