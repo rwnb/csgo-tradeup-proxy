@@ -10,6 +10,9 @@ import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Collections;
@@ -22,12 +25,14 @@ import okhttp3.Request;
 import okhttp3.Response;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.net.ssl.SSLException;
 
 /** Steam Community requests use a dedicated client and never log credentials or response bodies. */
 @Component
 public class CommunityClient {
     private static final URI COMMUNITY = URI.create("https://steamcommunity.com/");
     private static final Pattern TRADE_URL = Pattern.compile("https://steamcommunity\\.com/tradeoffer/new/\\?partner=\\d+(?:&amp;|&)token=[A-Za-z0-9_-]+");
+    private static final Pattern CONNECT_STATUS = Pattern.compile("Unexpected response code for CONNECT: ([1-5][0-9]{2})");
     private final String proxyHost, proxyUser, proxyPassword;
     private final int proxyPort;
 
@@ -45,10 +50,57 @@ public class CommunityClient {
     }
 
     static String parseTradeUrl(String html) {
-        if (html == null) throw new IllegalStateException("Steam trade URL unavailable");
+        if (html == null) throw failure(Stage.RESPONSE_BODY_MISSING);
         Matcher matcher = TRADE_URL.matcher(html);
-        if (!matcher.find()) throw new IllegalStateException("Steam trade URL unavailable");
+        if (!matcher.find()) throw failure(Stage.TRADE_URL_NOT_FOUND);
         return matcher.group().replace("&amp;", "&");
+    }
+
+    /** Only fixed stage names and numeric HTTP statuses may be written to logs. */
+    enum Stage {
+        INVALID_INPUT, PROXY_CONNECT_HTTP, PROXY_AUTHENTICATION, DNS, TIMEOUT, TLS,
+        NETWORK, HTTP_STATUS, RESPONSE_BODY_MISSING, REDIRECT_MISSING,
+        REDIRECT_INVALID, REDIRECT_SCHEME, REDIRECT_HOST, REDIRECT_PORT,
+        REDIRECT_LIMIT, TRADE_URL_NOT_FOUND, UNEXPECTED
+    }
+
+    static final class CommunityFailure extends IllegalStateException {
+        final Stage stage;
+        final int status;
+        CommunityFailure(Stage stage, int status) {
+            super(stage.name() + (status == 0 ? "" : " http=" + status));
+            this.stage = stage;
+            this.status = status;
+        }
+    }
+
+    private static CommunityFailure failure(Stage stage) { return new CommunityFailure(stage, 0); }
+
+    static String diagnostic(Exception exception) {
+        if (exception instanceof CommunityFailure) return exception.getMessage();
+        if (exception instanceof IllegalArgumentException) return Stage.INVALID_INPUT.name();
+        if (exception instanceof InterruptedIOException) return Stage.TIMEOUT.name();
+        if (exception instanceof UnknownHostException) return Stage.DNS.name();
+        if (exception instanceof SSLException) return Stage.TLS.name();
+        if (exception instanceof IOException) {
+            String message = exception.getMessage();
+            Matcher matcher = CONNECT_STATUS.matcher(message == null ? "" : message);
+            if (matcher.matches()) return Stage.PROXY_CONNECT_HTTP.name() + " http=" + matcher.group(1);
+            if ("Failed to authenticate with proxy".equals(message)) return Stage.PROXY_AUTHENTICATION.name();
+            return Stage.NETWORK.name();
+        }
+        return Stage.UNEXPECTED.name();
+    }
+
+    static URI redirect(URI current, String location) {
+        if (location == null || location.isEmpty()) throw failure(Stage.REDIRECT_MISSING);
+        URI next;
+        try { next = current.resolve(location); }
+        catch (IllegalArgumentException e) { throw failure(Stage.REDIRECT_INVALID); }
+        if (!"https".equalsIgnoreCase(next.getScheme())) throw failure(Stage.REDIRECT_SCHEME);
+        if (!"steamcommunity.com".equalsIgnoreCase(next.getHost())) throw failure(Stage.REDIRECT_HOST);
+        if (next.getPort() != -1) throw failure(Stage.REDIRECT_PORT);
+        return next;
     }
 
     public String inventoryPage(String steamId, String accessToken, long appId, long contextId, String cursor) throws Exception {
@@ -83,17 +135,16 @@ public class CommunityClient {
             try (Response response = client.newCall(request.build()).execute()) {
                 cookies.put(current, response.headers().toMultimap());
                 int status = response.code();
-                if (status == 200 && response.body() != null) return response.body().string();
+                if (status == 200) {
+                    if (response.body() == null) throw failure(Stage.RESPONSE_BODY_MISSING);
+                    return response.body().string();
+                }
                 if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308)
-                    throw new IllegalStateException("Steam Community HTTP " + status);
-                String location = response.header("Location");
-                if (location == null) throw new IllegalStateException("Missing redirect");
-                current = current.resolve(location);
+                    throw new CommunityFailure(Stage.HTTP_STATUS, status);
+                current = redirect(current, response.header("Location"));
             }
-            if (!"https".equalsIgnoreCase(current.getScheme()) || !"steamcommunity.com".equalsIgnoreCase(current.getHost()) || current.getPort() != -1)
-                throw new IllegalStateException("Invalid redirect");
         }
-        throw new IllegalStateException("Too many redirects");
+        throw failure(Stage.REDIRECT_LIMIT);
     }
     private static String checkedId(String id) {
         if (id == null || !id.matches("[0-9]{15,20}")) throw new IllegalArgumentException("Invalid Steam ID");

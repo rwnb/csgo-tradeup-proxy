@@ -5,6 +5,9 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URI;
+import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -27,6 +30,36 @@ class CommunityClientTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new CommunityClient("proxy.example", 0, "", ""))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void diagnosticReportsOnlyFixedStagesAndNumericStatus() {
+        assertThat(CommunityClient.diagnostic(new IOException("Unexpected response code for CONNECT: 407")))
+                .isEqualTo("PROXY_CONNECT_HTTP http=407");
+        assertThat(CommunityClient.diagnostic(new IOException("Failed to authenticate with proxy")))
+                .isEqualTo("PROXY_AUTHENTICATION");
+        assertThat(CommunityClient.diagnostic(new IOException("secret-cookie https://example.test/?token=secret")))
+                .isEqualTo("NETWORK");
+        assertThat(CommunityClient.diagnostic(new SocketTimeoutException("sensitive detail")))
+                .isEqualTo("TIMEOUT");
+        assertThat(CommunityClient.diagnostic(new CommunityClient.CommunityFailure(CommunityClient.Stage.HTTP_STATUS, 403)))
+                .isEqualTo("HTTP_STATUS http=403");
+        assertThatThrownBy(() -> CommunityClient.parseTradeUrl("<html>secret-token</html>"))
+                .hasMessage("TRADE_URL_NOT_FOUND").hasMessageNotContaining("secret-token");
+    }
+
+    @Test void rejectsUnsafeRedirectWithoutRecordingItsLocation() {
+        URI current = URI.create("https://steamcommunity.com/profiles/123");
+        assertThat(CommunityClient.redirect(current, "/tradeoffers/privacy"))
+                .isEqualTo(URI.create("https://steamcommunity.com/tradeoffers/privacy"));
+        assertThatThrownBy(() -> CommunityClient.redirect(current, null)).hasMessage("REDIRECT_MISSING");
+        assertThatThrownBy(() -> CommunityClient.redirect(current, "http://steamcommunity.com/secret"))
+                .hasMessage("REDIRECT_SCHEME").hasMessageNotContaining("secret");
+        assertThatThrownBy(() -> CommunityClient.redirect(current, "https://other.example/?token=secret"))
+                .hasMessage("REDIRECT_HOST").hasMessageNotContaining("secret");
+        assertThatThrownBy(() -> CommunityClient.redirect(current, "https://steamcommunity.com:444/"))
+                .hasMessage("REDIRECT_PORT");
+        assertThatThrownBy(() -> CommunityClient.redirect(current, "https://[invalid"))
+                .hasMessage("REDIRECT_INVALID");
     }
 
     @Test void authenticatesHttpConnectProxyWithoutGlobalJvmSettings() throws Exception {

@@ -152,7 +152,7 @@ public class JavaSteamGateway implements SteamGateway {
                                     String trade = community.tradeUrl(steamId, access);
                                     listener.webCredentials(null, trade, null);
                                 } catch (Exception failure) {
-                                    log.warn("Steam登录成功，但交易链接读取失败：{}", failure.getClass().getSimpleName());
+                                    log.warn("Steam登录成功，但交易链接读取失败：{}", CommunityClient.diagnostic(failure));
                                 }
                             } catch (Exception failure) {
                                 log.warn("Steam登录成功，但网页凭据生成失败：{}", failure.getClass().getSimpleName());
