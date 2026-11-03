@@ -1,0 +1,12 @@
+syntax = "proto2";
+package tradeup.steam.econ;
+option java_package = "com.csgo.tradeup.proxy.steam.proto";
+option java_outer_classname = "EconTradeTokenProtos";
+
+// Wire format from Steam's Econ.GetTradeOfferAccessToken#1 service.
+message GetTradeOfferAccessTokenRequest {
+  optional bool generate_new_token = 1 [default = false];
+}
+message GetTradeOfferAccessTokenResponse {
+  optional string trade_offer_access_token = 1;
+}

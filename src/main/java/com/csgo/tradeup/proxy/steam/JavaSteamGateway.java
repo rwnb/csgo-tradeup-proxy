@@ -72,7 +72,9 @@ public class JavaSteamGateway implements SteamGateway {
         private volatile CompletableFuture<?> protocolFuture;
         private volatile ScheduledFuture<?> pump;
         private final Object tradeLock = new Object();
-        private CommunityTradeUrlTask tradeTask;
+        private TradeUrlCoordinator tradeCoordinator;
+        private Future<?> webJob;
+        private CompletableFuture<?> webFuture;
         private volatile boolean restoring, online;
         ClientSession(Input input, Listener listener) { this.input = input; this.listener = listener; }
         void connect() {
@@ -149,32 +151,45 @@ public class JavaSteamGateway implements SteamGateway {
                 String steamId = Long.toUnsignedString(result.getClientSteamID().convertToUInt64());
                 if (!listener.success(steamId, input.refreshToken, input.guardData)) { close(); return; }
                 online = true;
+                Executor coordination = command -> {
+                    try { communityRequests.execute(command); }
+                    catch (RejectedExecutionException full) { communityRetries.execute(command); }
+                };
+                TradeUrlCoordinator coordinator = new TradeUrlCoordinator(coordination, (access, publish) -> {
+                    CommunityTradeUrlTask task = new CommunityTradeUrlTask(communityRequests, communityRetries,
+                            community::tradeUrl, publish, steamId, access);
+                    task.start(); return task;
+                }, listener::webCredentials);
+                synchronized (tradeLock) {
+                    if (closed.get()) { coordinator.close(); return; }
+                    tradeCoordinator = coordinator;
+                }
+                coordinator.start(new EconTradeUrlReader().read(client, result.getClientSteamID()));
                 String refresh = input.refreshToken;
                 if (refresh != null && !refresh.isEmpty()) {
                     try {
-                        authentication.submit(() -> {
+                        Future<?> job = authentication.submit(() -> {
+                            CompletableFuture<AccessTokenGenerateResult> request = null;
                             try {
-                                AccessTokenGenerateResult tokens = client.getAuthentication()
-                                        .generateAccessTokenForApp(result.getClientSteamID(), refresh, false).get(20, TimeUnit.SECONDS);
-                                String access = tokens.getAccessToken();
-                                listener.webCredentials(access, null, tokens.getRefreshToken());
-                                requestTradeUrl(steamId, access);
+                                if (closed.get()) return;
+                                request = client.getAuthentication().generateAccessTokenForApp(result.getClientSteamID(), refresh, false);
+                                synchronized (tradeLock) {
+                                    if (closed.get()) { request.cancel(true); return; }
+                                    webFuture = request;
+                                }
+                                AccessTokenGenerateResult tokens = request.get(20, TimeUnit.SECONDS);
+                                coordinator.webCredentials(tokens.getAccessToken(), tokens.getRefreshToken());
                             } catch (Exception failure) {
-                                log.warn("Steam登录成功，但网页凭据生成失败：{}", failure.getClass().getSimpleName());
+                                if (!closed.get()) log.warn("Steam登录成功，但网页凭据生成失败：{}", failure.getClass().getSimpleName());
+                            } finally {
+                                synchronized (tradeLock) { if (webFuture == request) webFuture = null; }
                             }
                         });
-                    } catch (RejectedExecutionException ignored) { }
+                        synchronized (tradeLock) { if (closed.get()) job.cancel(true); else webJob = job; }
+                    } catch (RejectedExecutionException ignored) { log.warn("Steam网页凭据生成队列已满"); }
                 }
                 input.clear();
             } catch (Exception e) { failed("FAILED", "登录结果保存失败，请检查密钥配置或稍后重试"); }
-        }
-        private void requestTradeUrl(String steamId, String accessToken) {
-            synchronized (tradeLock) {
-                if (closed.get()) return;
-                tradeTask = new CommunityTradeUrlTask(communityRequests, communityRetries, community::tradeUrl,
-                        value -> { if (!closed.get()) listener.webCredentials(null, value, null); }, steamId, accessToken);
-                tradeTask.start();
-            }
         }
         private boolean state(String value, String message) {
             if (closed.get()) return false;
@@ -216,7 +231,14 @@ public class JavaSteamGateway implements SteamGateway {
         }
         @Override public void close() {
             if (!closed.compareAndSet(false, true)) return;
-            synchronized (tradeLock) { if (tradeTask != null) { tradeTask.close(); tradeTask = null; } }
+            TradeUrlCoordinator coordinator; Future<?> job; CompletableFuture<?> request;
+            synchronized (tradeLock) {
+                coordinator = tradeCoordinator; tradeCoordinator = null;
+                job = webJob; webJob = null; request = webFuture; webFuture = null;
+            }
+            if (coordinator != null) coordinator.close();
+            if (job != null) job.cancel(true);
+            if (request != null) request.cancel(true);
             ScheduledFuture<?> p = pump; if (p != null) p.cancel(false);
             Future<?> a = authJob; if (a != null) a.cancel(true);
             CompletableFuture<?> f = protocolFuture; if (f != null) f.cancel(true);

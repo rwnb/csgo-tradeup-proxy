@@ -1,6 +1,6 @@
 # csgo-tradeup-proxy
 
-从 `csgo-tradeup-back` 提取的独立 Spring Boot 空项目，包名为 `com.csgo.tradeup.proxy`。沿用 Spring Boot 2.2.2、MyBatis-Plus 3.3.1、MySQL、Redis/Lettuce、Swagger 2 和 Maven Wrapper，使用 JDK 17 构建及运行，保持原项目 Java 8 字节码级别。
+独立 Steam 代理服务，包名为 `com.csgo.tradeup.proxy`。负责 Steam 连接、账号密码登录、Steam Guard 等待、交易链接和库存请求；账号权限及加密凭据由 `csgo-tradeup-back` 管理。使用 JDK 17 构建及运行，保持原项目 Java 8 字节码级别。
 
 ## 已包含
 
@@ -13,7 +13,11 @@
 
 Steam 内部接口使用服务密钥，密钥不足 32 字节时拒绝访问。项目包含公开的测试密钥，不能用于保护生产服务。账号权限和凭据密文仍由原后端管理；本服务中的 Steam 会话与未确认事件仅保存在内存，原后端停止轮询后约 45 秒关闭会话。服务重启会丢失会话，需要重新登录。库存接口按 appId、contextId 和游标返回单页，调用方负责处理分页和失败。
 
-跨公网部署时必须在服务前配置 HTTPS，使用受信任的证书，并限制 8092 仅能被反向代理或可信网络访问；不要将明文内部端口暴露公网。项目中内置公开的测试密钥，与后端默认测试密钥一致；正式使用必须分别设置相同的随机 `STEAM_INTERNAL_KEY` 和 `STEAM_PROXY_INTERNAL_KEY`。IPWO 默认配置已写入项目，可用 `STEAM_COMMUNITY_PROXY_HOST`、`STEAM_COMMUNITY_PROXY_PORT`、`STEAM_COMMUNITY_PROXY_USERNAME`、`STEAM_COMMUNITY_PROXY_PASSWORD` 覆盖；这些配置只用于 Community 请求，不作用于 Steam CM 登录连接。此仓库公开，IPWO 默认凭据和测试密钥对所有人可见。Steam 账号凭据不要写入仓库、访问日志或反向代理请求体日志。两个服务器应同步系统时间。
+服务间地址支持 HTTP 和 HTTPS。当前测试部署只运行 `proxy` 容器，通过 `http://美国服务器IP:8092` 访问；`.env` 设置 `PROXY_BIND_ADDRESS=0.0.0.0`，安全组仅允许国内后端 IP 的 `/32` 来源访问 TCP 8092。HTTP 会明文传输服务密钥及 Steam 登录凭据；正式部署应使用 HTTPS 或加密私网。项目中内置公开的测试密钥，与后端默认测试密钥一致；正式使用必须分别设置相同的随机 `STEAM_INTERNAL_KEY` 和 `STEAM_PROXY_INTERNAL_KEY`。两个服务器应同步系统时间。
+
+IPWO 默认配置已写入项目，可用 `STEAM_COMMUNITY_PROXY_HOST`、`STEAM_COMMUNITY_PROXY_PORT`、`STEAM_COMMUNITY_PROXY_USERNAME`、`STEAM_COMMUNITY_PROXY_PASSWORD` 覆盖。Steam 服务发现、CM WebSocket 连接、登录认证、交易链接和库存请求均使用此代理；缺少代理配置时拒绝直连。此仓库公开，IPWO 默认凭据和测试密钥对所有人可见。Steam 账号凭据不要写入仓库或访问日志。
+
+登录成功后，通过现有 CM 连接调用 `Econ.GetTradeOfferAccessToken#1`，明确传入 `generate_new_token=false` 读取现有交易链接，再由后端加密入库。网页令牌独立生成供库存使用；CM 读取失败时使用 Community 网页解析兜底，HTTP 429 最多尝试三次并尊重有限的 Retry-After 等待。读取接口及字段参照 [node-steam-user 的 econ 实现](https://github.com/DoctorMcKay/node-steam-user/blob/master/components/econ.js)。
 
 库存、交易链接及服务间链路上线前需要在目标服务器验证。IPWO 用户名需要带地区和会话参数，默认配置使用全球随机地区、10 分钟粘性会话；可在 IPWO 控制台生成其他配置并通过环境变量覆盖。
 
@@ -57,7 +61,7 @@ GitHub 网页手动构建：在仓库的 Settings → Secrets and variables → 
 ./scripts/deploy.sh 15565780467w/csgo-tradeup-proxy:run-运行ID-次数
 ```
 
-脚本先校验环境，再拉取指定版本、重建服务并检查本机 `/health`。该检查仅表示进程存活，不代表 IPWO、Steam、数据库或跨国 HTTPS 链路已联通。重建会断开原有内存中的 Steam 会话；健康检查失败不会自动回滚，可以用之前的镜像标签重新运行脚本。
+脚本先校验环境，再拉取指定版本、重建服务并检查本机 `/health`。该检查仅表示进程存活，不代表 IPWO、Steam、数据库或跨服务器链路已联通。重建会断开原有内存中的 Steam 会话；健康检查失败不会自动回滚，可以用之前的镜像标签重新运行脚本。
 
 ```bash
 docker build -t csgo-tradeup-proxy:local .
@@ -65,7 +69,7 @@ docker run -d --name csgo-tradeup-proxy --restart unless-stopped \
   --env-file /path/to/proxy.env -p 127.0.0.1:8092:8092 csgo-tradeup-proxy:local
 ```
 
-示例绑定服务器本地回环地址，服务器上的 HTTPS 反向代理再转发到 `127.0.0.1:8092`。如反向代理也运行于容器，需使用受限 Docker 网络，不要照搬该回环地址。运行和重启容器会丢失内存中的 Steam 登录会话，需在后台重新登录；持久凭据由原后端保存。
+上述 `docker run` 示例绑定服务器本地回环地址，适用于同机访问或已有 HTTPS 入口。跨服务器 HTTP 测试部署使用前述 Compose 配置，无需额外部署其他容器。运行和重启容器会丢失内存中的 Steam 登录会话，需在后台重新登录；持久凭据由原后端保存。
 
 运行 JAR 前同样需导出环境变量，也可通过外部 `config/application.yml` 配置连接信息。测试使用内存 H2 验证数据源，检查统一响应、异常处理、跨域、Swagger 及 Redis 序列化配置，不依赖外部 MySQL/Redis，也不执行真实 Redis 命令。
 
