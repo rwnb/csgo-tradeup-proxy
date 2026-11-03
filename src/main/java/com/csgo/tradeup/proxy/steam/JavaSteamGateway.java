@@ -30,13 +30,21 @@ public class JavaSteamGateway implements SteamGateway {
     private static final Logger log = LoggerFactory.getLogger(JavaSteamGateway.class);
     private final ScheduledExecutorService callbacks = Executors.newScheduledThreadPool(2, daemon("steam-callback"));
     private final ThreadPoolExecutor authentication;
+    private final ThreadPoolExecutor communityRequests;
+    private final ScheduledThreadPoolExecutor communityRetries;
     private final CommunityClient community;
+    private final SteamProxyConfiguration steamProxyConfiguration;
     public JavaSteamGateway(@Value("${tradeup.steam.auth-queue-size:100}") int queueSize,
-                            CommunityClient community) {
+                            CommunityClient community, SteamProxyConfiguration steamProxyConfiguration) {
         if (queueSize < 1 || queueSize > 1000) throw new IllegalArgumentException("Steam认证队列范围为1至1000");
         this.community = community;
+        this.steamProxyConfiguration = steamProxyConfiguration;
         authentication = new ThreadPoolExecutor(8, 8, 30, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(queueSize), daemon("steam-auth"), new ThreadPoolExecutor.AbortPolicy());
+        communityRequests = new ThreadPoolExecutor(4, 4, 30, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(queueSize), daemon("steam-community"), new ThreadPoolExecutor.AbortPolicy());
+        communityRetries = new ScheduledThreadPoolExecutor(1, daemon("steam-community-retry"));
+        communityRetries.setRemoveOnCancelPolicy(true);
         if (Security.getProvider("BC") == null) Security.addProvider(new BouncyCastleProvider());
     }
     private static ThreadFactory daemon(String prefix) {
@@ -48,12 +56,12 @@ public class JavaSteamGateway implements SteamGateway {
         try { session.connect(); return session; }
         catch (Exception e) { session.close(); throw new BizException(ResultCode.UNAVAILABLE, "无法建立Steam连接，请稍后重试"); }
     }
-    @PreDestroy void shutdown() { callbacks.shutdownNow(); authentication.shutdownNow(); }
+    @PreDestroy void shutdown() { callbacks.shutdownNow(); authentication.shutdownNow(); communityRetries.shutdownNow(); communityRequests.shutdownNow(); }
 
     private final class ClientSession implements Session, IAuthenticator {
         private final Input input;
         private final Listener listener;
-        private final SteamClient client = new SteamClient();
+        private final SteamClient client = new SteamClient(steamProxyConfiguration.create());
         private final SteamUser user = client.getHandler(SteamUser.class);
         private final CallbackManager manager = new CallbackManager(client);
         private final List<Closeable> subscriptions = new ArrayList<>();
@@ -63,6 +71,8 @@ public class JavaSteamGateway implements SteamGateway {
         private volatile Future<?> authJob;
         private volatile CompletableFuture<?> protocolFuture;
         private volatile ScheduledFuture<?> pump;
+        private final Object tradeLock = new Object();
+        private CommunityTradeUrlTask tradeTask;
         private volatile boolean restoring, online;
         ClientSession(Input input, Listener listener) { this.input = input; this.listener = listener; }
         void connect() {
@@ -148,12 +158,7 @@ public class JavaSteamGateway implements SteamGateway {
                                         .generateAccessTokenForApp(result.getClientSteamID(), refresh, false).get(20, TimeUnit.SECONDS);
                                 String access = tokens.getAccessToken();
                                 listener.webCredentials(access, null, tokens.getRefreshToken());
-                                try {
-                                    String trade = community.tradeUrl(steamId, access);
-                                    listener.webCredentials(null, trade, null);
-                                } catch (Exception failure) {
-                                    log.warn("Steam登录成功，但交易链接读取失败：{}", CommunityClient.diagnostic(failure));
-                                }
+                                requestTradeUrl(steamId, access);
                             } catch (Exception failure) {
                                 log.warn("Steam登录成功，但网页凭据生成失败：{}", failure.getClass().getSimpleName());
                             }
@@ -162,6 +167,14 @@ public class JavaSteamGateway implements SteamGateway {
                 }
                 input.clear();
             } catch (Exception e) { failed("FAILED", "登录结果保存失败，请检查密钥配置或稍后重试"); }
+        }
+        private void requestTradeUrl(String steamId, String accessToken) {
+            synchronized (tradeLock) {
+                if (closed.get()) return;
+                tradeTask = new CommunityTradeUrlTask(communityRequests, communityRetries, community::tradeUrl,
+                        value -> { if (!closed.get()) listener.webCredentials(null, value, null); }, steamId, accessToken);
+                tradeTask.start();
+            }
         }
         private boolean state(String value, String message) {
             if (closed.get()) return false;
@@ -203,6 +216,7 @@ public class JavaSteamGateway implements SteamGateway {
         }
         @Override public void close() {
             if (!closed.compareAndSet(false, true)) return;
+            synchronized (tradeLock) { if (tradeTask != null) { tradeTask.close(); tradeTask = null; } }
             ScheduledFuture<?> p = pump; if (p != null) p.cancel(false);
             Future<?> a = authJob; if (a != null) a.cancel(true);
             CompletableFuture<?> f = protocolFuture; if (f != null) f.cancel(true);

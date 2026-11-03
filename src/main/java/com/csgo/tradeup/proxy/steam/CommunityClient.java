@@ -15,6 +15,10 @@ import java.io.InterruptedIOException;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -67,10 +71,16 @@ public class CommunityClient {
     static final class CommunityFailure extends IllegalStateException {
         final Stage stage;
         final int status;
+        /** Positive milliseconds from a valid Retry-After; 0 means absent or invalid. */
+        final long retryAfterMillis;
         CommunityFailure(Stage stage, int status) {
+            this(stage, status, 0);
+        }
+        CommunityFailure(Stage stage, int status, long retryAfterMillis) {
             super(stage.name() + (status == 0 ? "" : " http=" + status));
             this.stage = stage;
             this.status = status;
+            this.retryAfterMillis = retryAfterMillis;
         }
     }
 
@@ -101,6 +111,23 @@ public class CommunityClient {
         if (!"steamcommunity.com".equalsIgnoreCase(next.getHost())) throw failure(Stage.REDIRECT_HOST);
         if (next.getPort() != -1) throw failure(Stage.REDIRECT_PORT);
         return next;
+    }
+
+    static long retryAfterMillis(String value, Instant now) {
+        if (value == null) return 0;
+        String text = value.trim();
+        if (text.matches("[0-9]+")) {
+            try {
+                long seconds = Long.parseLong(text);
+                return seconds > Long.MAX_VALUE / 1000 ? Long.MAX_VALUE : seconds * 1000;
+            } catch (NumberFormatException e) { return Long.MAX_VALUE; }
+        }
+        try {
+            Instant target = ZonedDateTime.parse(text, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+            if (!target.isAfter(now)) return 0;
+            try { return Math.subtractExact(target.toEpochMilli(), now.toEpochMilli()); }
+            catch (ArithmeticException e) { return Long.MAX_VALUE; }
+        } catch (DateTimeParseException | ArithmeticException e) { return 0; }
     }
 
     public String inventoryPage(String steamId, String accessToken, long appId, long contextId, String cursor) throws Exception {
@@ -140,7 +167,8 @@ public class CommunityClient {
                     return response.body().string();
                 }
                 if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308)
-                    throw new CommunityFailure(Stage.HTTP_STATUS, status);
+                    throw new CommunityFailure(Stage.HTTP_STATUS, status,
+                            status == 429 ? retryAfterMillis(response.header("Retry-After"), Instant.now()) : 0);
                 current = redirect(current, response.header("Location"));
             }
         }

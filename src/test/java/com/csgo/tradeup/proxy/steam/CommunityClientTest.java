@@ -8,6 +8,7 @@ import java.net.Socket;
 import java.net.URI;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
+import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -60,6 +61,15 @@ class CommunityClientTest {
                 .hasMessage("REDIRECT_PORT");
         assertThatThrownBy(() -> CommunityClient.redirect(current, "https://[invalid"))
                 .hasMessage("REDIRECT_INVALID");
+    }
+
+    @Test void parsesRetryAfterWithoutReducingLongServerDelays() {
+        Instant now = Instant.parse("2026-11-03T08:00:00Z");
+        assertThat(CommunityClient.retryAfterMillis("20", now)).isEqualTo(20000);
+        assertThat(CommunityClient.retryAfterMillis("Tue, 3 Nov 2026 08:00:45 GMT", now)).isEqualTo(45000);
+        assertThat(CommunityClient.retryAfterMillis("Tue, 3 Nov 2026 07:59:45 GMT", now)).isZero();
+        assertThat(CommunityClient.retryAfterMillis("invalid", now)).isZero();
+        assertThat(CommunityClient.retryAfterMillis("999999999999999999999999", now)).isEqualTo(Long.MAX_VALUE);
     }
 
     @Test void authenticatesHttpConnectProxyWithoutGlobalJvmSettings() throws Exception {
