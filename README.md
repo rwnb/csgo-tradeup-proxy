@@ -13,9 +13,9 @@
 
 Steam 内部接口使用独立服务密钥，未配置或密钥不足 32 字节时拒绝访问。账号权限和凭据密文仍由原后端管理；本服务中的 Steam 会话与未确认事件仅保存在内存，原后端停止轮询后约 45 秒关闭会话。服务重启会丢失会话，需要重新登录。库存接口按 appId、contextId 和游标返回单页，调用方负责处理分页和失败。
 
-跨公网部署时必须在服务前配置 HTTPS，使用受信任的证书，并限制 8092 仅能被反向代理或可信网络访问；不要将明文内部端口暴露公网。设置 `STEAM_INTERNAL_KEY` 为至少 32 字节的随机值，与后端 `STEAM_PROXY_INTERNAL_KEY` 相同。`STEAM_COMMUNITY_PROXY_HOST`、`STEAM_COMMUNITY_PROXY_PORT`、`STEAM_COMMUNITY_PROXY_USERNAME`、`STEAM_COMMUNITY_PROXY_PASSWORD` 可配置 IPWO；这些配置只用于 Community 请求，不作用于 Steam CM 登录连接。账号密码、令牌和密钥不得写入仓库、访问日志或反向代理请求体日志。两个服务器应同步系统时间。
+跨公网部署时必须在服务前配置 HTTPS，使用受信任的证书，并限制 8092 仅能被反向代理或可信网络访问；不要将明文内部端口暴露公网。设置 `STEAM_INTERNAL_KEY` 为至少 32 字节的随机值，与后端 `STEAM_PROXY_INTERNAL_KEY` 相同。IPWO 默认配置已写入项目，可用 `STEAM_COMMUNITY_PROXY_HOST`、`STEAM_COMMUNITY_PROXY_PORT`、`STEAM_COMMUNITY_PROXY_USERNAME`、`STEAM_COMMUNITY_PROXY_PASSWORD` 覆盖；这些配置只用于 Community 请求，不作用于 Steam CM 登录连接。此仓库公开，IPWO 默认凭据对所有人可见。服务间密钥和 Steam 账号凭据不要写入仓库、访问日志或反向代理请求体日志。两个服务器应同步系统时间。
 
-库存、交易链接及服务间链路上线前需要在目标服务器验证，尤其是 IPWO 的代理协议与认证配置。默认未配置代理时 Community 直连。
+库存、交易链接及服务间链路上线前需要在目标服务器验证，尤其是 IPWO 的代理协议与认证配置。默认使用项目中的 IPWO 配置。
 
 ## 配置与启动
 
