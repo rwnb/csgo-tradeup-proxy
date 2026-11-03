@@ -49,7 +49,7 @@ java -jar target/csgo-tradeup-proxy.jar
 
 Docker 使用 JDK 17 多阶段构建，并以非 root 用户运行。`.dockerignore` 排除了本机 `.env`、日志和构建产物；实际密钥由服务器上的环境文件提供，文件权限应限制为部署用户可读。
 
-GitHub 网页手动构建：在仓库的 Settings → Secrets and variables → Actions 中配置变量 `DOCKERHUB_USERNAME`（Docker Hub 用户名，不是邮箱）和 secret `DOCKERHUB_TOKEN`（建议使用 Docker Hub 访问令牌）。之后在 Actions → “构建并推送 Docker 镜像” → Run workflow 点击运行。每次先运行测试，再构建并推送 amd64 和 arm64 镜像；镜像标签在运行结果的 Summary 中显示。该工作流不负责部署或重启服务器。
+GitHub 网页手动构建：在仓库的 Settings → Secrets and variables → Actions 中配置变量 `DOCKERHUB_USERNAME`（Docker Hub 用户名，不是邮箱）和 secret `DOCKERHUB_TOKEN`（建议使用 Docker Hub 访问令牌）。之后在 Actions → “构建并推送 Docker 镜像” → Run workflow 点击运行。每次先运行测试，再构建并推送 `linux/amd64` 镜像；镜像标签在运行结果的 Summary 中显示。该工作流不负责部署或重启服务器。
 
 ```bash
 docker build -t csgo-tradeup-proxy:local .
