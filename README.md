@@ -11,7 +11,11 @@
 - Swagger 开关、控制台及按天滚动日志、环境变量配置。
 - `GET /health` 进程存活接口。
 
-这是基础工程，尚未接入 Xunics 或其他代理业务，也没有登录认证、角色权限、Steam 业务、业务 Mapper 和业务表 SQL。跨域默认允许任意来源但不携带 Cookie 凭据；后续业务按需要接入认证。Swagger 不预设原后端的 Token 登录方案。
+Steam 内部接口使用独立服务密钥，未配置或密钥不足 32 字节时拒绝访问。账号权限和凭据密文仍由原后端管理；本服务中的 Steam 会话与未确认事件仅保存在内存，原后端停止轮询后约 45 秒关闭会话。服务重启会丢失会话，需要重新登录。库存接口按 appId、contextId 和游标返回单页，调用方负责处理分页和失败。
+
+跨公网部署时必须在服务前配置 HTTPS，使用受信任的证书，并限制 8092 仅能被反向代理或可信网络访问；不要将明文内部端口暴露公网。设置 `STEAM_INTERNAL_KEY` 为至少 32 字节的随机值，与后端 `STEAM_PROXY_INTERNAL_KEY` 相同。`STEAM_COMMUNITY_PROXY_HOST`、`STEAM_COMMUNITY_PROXY_PORT`、`STEAM_COMMUNITY_PROXY_USERNAME`、`STEAM_COMMUNITY_PROXY_PASSWORD` 可配置 IPWO；这些配置只用于 Community 请求，不作用于 Steam CM 登录连接。账号密码、令牌和密钥不得写入仓库、访问日志或反向代理请求体日志。两个服务器应同步系统时间。
+
+库存、交易链接及服务间链路上线前需要在目标服务器验证，尤其是 IPWO 的代理协议与认证配置。默认未配置代理时 Community 直连。
 
 ## 配置与启动
 
@@ -42,6 +46,16 @@ set +a
 ./mvnw clean verify
 java -jar target/csgo-tradeup-proxy.jar
 ```
+
+Docker 使用 JDK 17 多阶段构建，并以非 root 用户运行。`.dockerignore` 排除了本机 `.env`、日志和构建产物；实际密钥由服务器上的环境文件提供，文件权限应限制为部署用户可读。
+
+```bash
+docker build -t csgo-tradeup-proxy:local .
+docker run -d --name csgo-tradeup-proxy --restart unless-stopped \
+  --env-file /path/to/proxy.env -p 127.0.0.1:8092:8092 csgo-tradeup-proxy:local
+```
+
+示例绑定服务器本地回环地址，服务器上的 HTTPS 反向代理再转发到 `127.0.0.1:8092`。如反向代理也运行于容器，需使用受限 Docker 网络，不要照搬该回环地址。运行和重启容器会丢失内存中的 Steam 登录会话，需在后台重新登录；持久凭据由原后端保存。
 
 运行 JAR 前同样需导出环境变量，也可通过外部 `config/application.yml` 配置连接信息。测试使用内存 H2 验证数据源，检查统一响应、异常处理、跨域、Swagger 及 Redis 序列化配置，不依赖外部 MySQL/Redis，也不执行真实 Redis 命令。
 

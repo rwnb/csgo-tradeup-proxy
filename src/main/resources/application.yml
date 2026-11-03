@@ -31,3 +31,12 @@ mybatis-plus:
 
 tradeup:
   swagger-enabled: ${SWAGGER_ENABLED:false}
+
+steam:
+  internal-key: ${STEAM_INTERNAL_KEY:}
+  community:
+    proxy:
+      host: ${STEAM_COMMUNITY_PROXY_HOST:}
+      port: ${STEAM_COMMUNITY_PROXY_PORT:0}
+      username: ${STEAM_COMMUNITY_PROXY_USERNAME:}
+      password: ${STEAM_COMMUNITY_PROXY_PASSWORD:}
