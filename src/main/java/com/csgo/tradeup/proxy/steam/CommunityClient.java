@@ -2,6 +2,9 @@ package com.csgo.tradeup.proxy.steam;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 
 import java.net.CookieManager;
 import java.net.CookiePolicy;
@@ -35,7 +38,7 @@ import javax.net.ssl.SSLException;
 @Component
 public class CommunityClient {
     private static final URI COMMUNITY = URI.create("https://steamcommunity.com/");
-    private static final Pattern TRADE_URL = Pattern.compile("https://steamcommunity\\.com/tradeoffer/new/\\?partner=\\d+(?:&amp;|&)token=[A-Za-z0-9_-]+");
+    private static final Pattern TRADE_URL = Pattern.compile("https://steamcommunity\\.com/tradeoffer/new/\\?partner=[0-9]+&token=[A-Za-z0-9_-]+");
     private static final Pattern CONNECT_STATUS = Pattern.compile("Unexpected response code for CONNECT: ([1-5][0-9]{2})");
     private final String proxyHost, proxyUser, proxyPassword;
     private final int proxyPort;
@@ -55,17 +58,30 @@ public class CommunityClient {
 
     static String parseTradeUrl(String html) {
         if (html == null) throw failure(Stage.RESPONSE_BODY_MISSING);
-        Matcher matcher = TRADE_URL.matcher(html);
-        if (!matcher.find()) throw failure(Stage.TRADE_URL_NOT_FOUND);
-        return matcher.group().replace("&amp;", "&");
+        Document page = Jsoup.parse(html);
+        Element field = page.getElementById("trade_offer_access_url");
+        if (field != null) {
+            String value = field.val().trim();
+            if (value.isEmpty()) throw failure(Stage.TRADE_URL_NOT_FOUND);
+            if (!TRADE_URL.matcher(value).matches()) throw failure(Stage.TRADE_URL_INVALID);
+            return value;
+        }
+        // Older pages may expose the URL in an input or link without the standard ID.
+        for (Element element : page.select("[value], [href]")) {
+            String value = element.attr("value").trim();
+            if (TRADE_URL.matcher(value).matches()) return value;
+            value = element.attr("href").trim();
+            if (TRADE_URL.matcher(value).matches()) return value;
+        }
+        throw failure(Stage.TRADE_URL_NOT_FOUND);
     }
 
     /** Only fixed stage names and numeric HTTP statuses may be written to logs. */
     enum Stage {
-        INVALID_INPUT, PROXY_CONNECT_HTTP, PROXY_AUTHENTICATION, DNS, TIMEOUT, TLS,
+        INVALID_INPUT, PROXY_NOT_CONFIGURED, PROXY_CONNECT_HTTP, PROXY_AUTHENTICATION, DNS, TIMEOUT, TLS,
         NETWORK, HTTP_STATUS, RESPONSE_BODY_MISSING, REDIRECT_MISSING,
         REDIRECT_INVALID, REDIRECT_SCHEME, REDIRECT_HOST, REDIRECT_PORT,
-        REDIRECT_LIMIT, TRADE_URL_NOT_FOUND, UNEXPECTED
+        REDIRECT_LIMIT, TRADE_URL_NOT_FOUND, TRADE_URL_INVALID, UNEXPECTED
     }
 
     static final class CommunityFailure extends IllegalStateException {
@@ -140,6 +156,7 @@ public class CommunityClient {
     private String get(String steamId, String accessToken, String path) throws Exception {
         checkedId(steamId);
         if (accessToken == null || accessToken.isEmpty()) throw new IllegalArgumentException("Access token required");
+        if (proxyHost.isEmpty()) throw failure(Stage.PROXY_NOT_CONFIGURED);
         CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         addCookie(cookies, "steamLoginSecure", URLEncoder.encode(steamId + "||" + accessToken, StandardCharsets.UTF_8.name()));
         byte[] bytes = new byte[12]; new SecureRandom().nextBytes(bytes);

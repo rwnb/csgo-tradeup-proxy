@@ -24,6 +24,34 @@ class CommunityClientTest {
         assertThatThrownBy(() -> CommunityClient.parseTradeUrl("<html>login required</html>"))
                 .isInstanceOf(IllegalStateException.class);
     }
+    @Test void readsTheRushFieldBeforeOtherLinksAndDecodesHtmlEntities() {
+        String html = "<a href='https://steamcommunity.com/tradeoffer/new/?partner=1&amp;token=decoy'>other</a>"
+                + "<input value='https://steamcommunity.com/tradeoffer/new/?partner=123&#38;token=correct' id='trade_offer_access_url'>";
+        assertThat(CommunityClient.parseTradeUrl(html))
+                .isEqualTo("https://steamcommunity.com/tradeoffer/new/?partner=123&token=correct");
+    }
+
+    @Test void rejectsInvalidAuthoritativeFieldEvenIfAnotherLinkIsValid() {
+        String[] invalid = {
+                "http://steamcommunity.com/tradeoffer/new/?partner=123&token=secret",
+                "https://steamcommunity.com.evil.test/tradeoffer/new/?partner=123&token=secret",
+                "https://steamcommunity.com:443/tradeoffer/new/?partner=123&token=secret",
+                "https://steamcommunity.com/tradeoffer/new/?partner=123&token=secret&extra=1",
+                "https://steamcommunity.com/tradeoffer/new/?partner=123&token=secret#fragment",
+                "https://evil.test/?next=https://steamcommunity.com/tradeoffer/new/?partner=123&token=secret"
+        };
+        for (String value : invalid) {
+            String html = "<input id='trade_offer_access_url' value='" + value + "'>"
+                    + "<a href='https://steamcommunity.com/tradeoffer/new/?partner=1&amp;token=decoy'>other</a>";
+            assertThatThrownBy(() -> CommunityClient.parseTradeUrl(html))
+                    .hasMessage("TRADE_URL_INVALID").hasMessageNotContaining("secret");
+        }
+        assertThatThrownBy(() -> CommunityClient.parseTradeUrl("<input id='trade_offer_access_url' value=''>"
+                + "<a href='https://steamcommunity.com/tradeoffer/new/?partner=1&amp;token=decoy'>other</a>"))
+                .hasMessage("TRADE_URL_NOT_FOUND");
+        assertThatThrownBy(() -> CommunityClient.parseTradeUrl("<a href='https://steamcommunity.com/tradeoffer/new/?partner=1&amp;token=secret&amp;extra=1'>bad</a>"))
+                .hasMessage("TRADE_URL_NOT_FOUND");
+    }
     @Test void rejectsInvalidInputsBeforeNetworkAccess() {
         CommunityClient client = new CommunityClient("", 0, "", "");
         assertThatThrownBy(() -> client.tradeUrl("invalid", "token")).isInstanceOf(IllegalArgumentException.class);
@@ -31,6 +59,10 @@ class CommunityClientTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new CommunityClient("proxy.example", 0, "", ""))
                 .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> client.tradeUrl("76561198000000000", "token"))
+                .hasMessage("PROXY_NOT_CONFIGURED");
+        assertThatThrownBy(() -> client.inventoryPage("76561198000000000", "token", 730, 2, ""))
+                .hasMessage("PROXY_NOT_CONFIGURED");
     }
 
     @Test void diagnosticReportsOnlyFixedStagesAndNumericStatus() {
