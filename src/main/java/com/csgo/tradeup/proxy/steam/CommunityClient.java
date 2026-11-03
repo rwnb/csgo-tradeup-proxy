@@ -165,7 +165,7 @@ public class CommunityClient {
         OkHttpClient.Builder builder = new OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS)
                 .callTimeout(20, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false);
         if (!proxyHost.isEmpty()) {
-            builder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort)));
+            builder.proxy(new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(proxyHost, proxyPort)));
             if (!proxyUser.isEmpty()) builder.proxyAuthenticator((route, response) -> {
                 if (response.request().header("Proxy-Authorization") != null) return null;
                 return response.request().newBuilder().header("Proxy-Authorization", Credentials.basic(proxyUser, proxyPassword)).build();

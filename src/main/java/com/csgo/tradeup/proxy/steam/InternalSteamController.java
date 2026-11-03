@@ -77,10 +77,15 @@ public class InternalSteamController {
     public void close(@PathVariable String id) { Holder h = sessions.remove(id); if (h != null) h.close(); }
     @PostMapping("/inventory")
     public Object inventory(@RequestBody InventoryRequest request) throws Exception {
-        com.fasterxml.jackson.databind.JsonNode page = new com.fasterxml.jackson.databind.ObjectMapper().readTree(
-                community.inventoryPage(request.steamId, request.accessToken, request.appId, request.contextId, request.cursor));
-        if (!page.path("success").asBoolean(false)) throw new BizException(ResultCode.UNAVAILABLE, "Steam inventory unavailable");
-        return page;
+        try {
+            com.fasterxml.jackson.databind.JsonNode page = new com.fasterxml.jackson.databind.ObjectMapper().readTree(
+                    community.inventoryPage(request.steamId, request.accessToken, request.appId, request.contextId, request.cursor));
+            if (!page.path("success").asBoolean(false)) throw new BizException(ResultCode.UNAVAILABLE, "Steam inventory unavailable");
+            return page;
+        } catch (Exception e) {
+            log.warn("Steam库存读取失败：{}", CommunityClient.diagnostic(e));
+            throw e;
+        }
     }
     private Holder find(String id) { Holder h = sessions.get(id); if (h == null) throw new BizException(ResultCode.NOT_FOUND, "Session expired"); return h; }
     @PreDestroy public void shutdown() { cleanup.shutdownNow(); starts.shutdownNow(); sessions.values().forEach(Holder::close); sessions.clear(); }

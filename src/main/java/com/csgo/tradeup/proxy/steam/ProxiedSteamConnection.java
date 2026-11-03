@@ -31,7 +31,8 @@ final class ProxiedSteamConnection extends Connection {
 
     ProxiedSteamConnection(OkHttpClient client) {
         this((request, listener, timeout) -> client.newBuilder().connectTimeout(timeout, TimeUnit.MILLISECONDS)
-                .readTimeout(0, TimeUnit.MILLISECONDS).pingInterval(15, TimeUnit.SECONDS).build()
+                .readTimeout(timeout, TimeUnit.MILLISECONDS).callTimeout(timeout, TimeUnit.MILLISECONDS)
+                .pingInterval(15, TimeUnit.SECONDS).build()
                 .newWebSocket(request, listener));
     }
     ProxiedSteamConnection(SocketFactory factory) { this.factory = factory; }
@@ -45,7 +46,8 @@ final class ProxiedSteamConnection extends Connection {
         try {
             HttpUrl url = new HttpUrl.Builder().scheme("https").host(endpoint.getHostString())
                     .port(endpoint.getPort()).addPathSegment("cmsocket").addPathSegment("").build();
-            WebSocket started = factory.open(new Request.Builder().url(url).build(), new Listener(id), timeout);
+            int handshakeTimeout = timeout > 0 ? Math.min(timeout, 30000) : 30000;
+            WebSocket started = factory.open(new Request.Builder().url(url).build(), new Listener(id), handshakeTimeout);
             synchronized (lock) {
                 if (active && generation == id) socket = started;
                 else started.cancel();
@@ -87,12 +89,16 @@ final class ProxiedSteamConnection extends Connection {
 
     private final class Listener extends WebSocketListener {
         private final long id;
+        private final long startedNanos = System.nanoTime();
+        private volatile boolean opened;
         Listener(long id) { this.id = id; }
         @Override public void onOpen(WebSocket webSocket, Response response) {
             synchronized (lock) {
                 if (!active || generation != id) { webSocket.cancel(); return; }
                 socket = webSocket;
+                opened = true;
             }
+            log.info("Steam代理CM握手成功 elapsed_ms={}", elapsedMillis());
             onConnected();
         }
         @Override public void onMessage(WebSocket webSocket, ByteString bytes) {
@@ -111,8 +117,9 @@ final class ProxiedSteamConnection extends Connection {
             synchronized (lock) { if (!active || generation != id) return; }
             String diagnostic = response != null ? "HTTP_STATUS http=" + response.code()
                     : t instanceof Exception ? CommunityClient.diagnostic((Exception) t) : "UNEXPECTED";
-            log.warn("Steam代理连接失败：{}", diagnostic);
+            log.warn("Steam代理连接失败 stage={} {} elapsed_ms={}", opened ? "CM_STREAM" : "CM_HANDSHAKE", diagnostic, elapsedMillis());
             ended(id, false);
         }
+        private long elapsedMillis() { return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos); }
     }
 }
