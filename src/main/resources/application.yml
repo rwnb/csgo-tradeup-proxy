@@ -35,7 +35,7 @@ tradeup:
 xunics:
   base-url: https://xunics.com/api/public
   # 可直接填写 API Key，或在部署目录 config/application.yml 中覆盖此项。
-  api-key: ${XUNICS_API_KEY:}
+  api-key: ${XUNICS_API_KEY:xun-UHr3b2DDDUu17KCcL0Y5NRwASIYK8COa84xzdme6Llc}
   connect-timeout: 5s
   read-timeout: 120s
   connection-request-timeout: 5s
