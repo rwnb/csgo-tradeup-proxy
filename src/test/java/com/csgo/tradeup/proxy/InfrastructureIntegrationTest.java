@@ -76,6 +76,24 @@ class InfrastructureIntegrationTest {
     }
 
     @Test
+    void swaggerDescribesTypedRequestAndUnifiedResponseModels() throws Exception {
+        String json = mvc.perform(get("/v2/api-docs")).andReturn().getResponse().getContentAsString();
+        com.fasterxml.jackson.databind.JsonNode doc = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+        com.fasterxml.jackson.databind.JsonNode operation = doc.path("paths").path("/api/public/v1/orders/quick").path("post");
+        String resultRef = operation.path("responses").path("200").path("schema").path("$ref").asText();
+        org.junit.jupiter.api.Assertions.assertTrue(resultRef.contains("ResultInfo"));
+        com.fasterxml.jackson.databind.JsonNode result = doc.path("definitions").path(resultRef.substring("#/definitions/".length()));
+        org.junit.jupiter.api.Assertions.assertTrue(result.path("properties").has("success"));
+        org.junit.jupiter.api.Assertions.assertTrue(result.path("properties").path("data").path("$ref").asText().contains("OrderInfo"));
+        org.junit.jupiter.api.Assertions.assertTrue(doc.path("definitions").path("QuickOrderParam").path("properties").has("external_order_no"));
+        java.util.Set<String> names = new java.util.HashSet<>();
+        doc.path("paths").path("/api/public/v1/items").path("get").path("parameters")
+                .forEach(parameter -> names.add(parameter.path("name").asText()));
+        org.junit.jupiter.api.Assertions.assertTrue(names.contains("market_hash_name"), names.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(names.contains("float_min"), names.toString());
+    }
+
+    @Test
     void datasourceWorksWithoutBusinessTables() {
         assertEquals(Integer.valueOf(1), jdbc.queryForObject("SELECT 1", Integer.class));
     }

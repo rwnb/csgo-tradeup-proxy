@@ -5,7 +5,7 @@ import lombok.Data;
 import java.io.Serializable;
 
 @Data
-public class ResultInfo implements Serializable {
+public class ResultInfo<T> implements Serializable {
     private static final long serialVersionUID = -8220880361859927361L;
     /**
      * 请求结果
@@ -24,7 +24,7 @@ public class ResultInfo implements Serializable {
     /**
      * 结果集
      */
-    private Object data;
+    private T data;
 
 
     /**
@@ -35,7 +35,7 @@ public class ResultInfo implements Serializable {
      * @param message
      * @param data
      */
-    public ResultInfo(boolean success, int code, String message, Object data) {
+    public ResultInfo(boolean success, int code, String message, T data) {
         this.success = success;
         this.code = code;
         this.message = message;

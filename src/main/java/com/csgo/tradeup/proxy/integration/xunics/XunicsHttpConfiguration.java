@@ -27,7 +27,6 @@ public class XunicsHttpConfiguration {
                 .disableAutomaticRetries()
                 .disableRedirectHandling()
                 .disableCookieManagement()
-                .disableContentCompression()
                 .build();
     }
 

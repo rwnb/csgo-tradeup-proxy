@@ -9,12 +9,12 @@ public class ResultHelper {
      * @param data
      * @return
      */
-    public static ResultInfo successResultInfo(Object data) {
-        return new ResultInfo(Boolean.TRUE, ResultCode.SUCCESS.getCode(), ResultCode.SUCCESS.getDesc(), data);
+    public static <T> ResultInfo<T> successResultInfo(T data) {
+        return new ResultInfo<>(Boolean.TRUE, ResultCode.SUCCESS.getCode(), ResultCode.SUCCESS.getDesc(), data);
 
     }
-    public static ResultInfo successResultInfo(String msg ,Object data) {
-        return new ResultInfo(Boolean.TRUE, ResultCode.SUCCESS.getCode(), msg, data);
+    public static <T> ResultInfo<T> successResultInfo(String msg, T data) {
+        return new ResultInfo<>(Boolean.TRUE, ResultCode.SUCCESS.getCode(), msg, data);
 
     }
 
@@ -25,7 +25,7 @@ public class ResultHelper {
      * @param message
      * @return
      */
-    public static ResultInfo failResultInfo(int code, String message) {
-        return new ResultInfo(Boolean.FALSE, code, message, null);
+    public static <T> ResultInfo<T> failResultInfo(int code, String message) {
+        return new ResultInfo<>(Boolean.FALSE, code, message, null);
     }
 }

@@ -1,6 +1,6 @@
 # csgo-tradeup-proxy
 
-部署在海外节点的 Xunics API 代理。调用方将 `https://xunics.com` 换成代理域名，保留 `/api/public/v1/...` 路径、查询参数和请求体。代理从配置读取 Xunics API Key，向上游注入 `Authorization: Bearer <api-key>`。
+部署在海外节点的 Xunics API 代理。调用方将 `https://xunics.com` 换成代理域名，保留 `/api/public/v1/...` 路径和业务入参字段，响应统一为 back 的 `ResultInfo<T>` 格式。代理从配置读取 Xunics API Key，向上游注入 `Authorization: Bearer <api-key>`。
 
 继承 `csgo-tradeup-back` 的 Spring Boot 2.2.2、MyBatis-Plus 3.3.1、MySQL、Redis、日志和统一异常基础设施，使用 JDK 17 构建及运行。Xunics 转发本身不读写数据库或 Redis。
 
@@ -22,28 +22,56 @@
 | GET | `/v1/wallets/me/ledger` | 资金流水 |
 | GET | `/v1/wallets/me/holds` | 订单冻结资金 |
 
-完整入参、响应字段和约束以 [Xunics 官方文档](https://xunics.com/api/public/docs) 为准，项目保存了 [2026-11-04 OpenAPI 快照](docs/xunics-openapi.json)。快照描述的是上游协议，其中的 API Key 鉴权由本代理负责。
+原业务入参、data 字段和约束以 [Xunics 官方文档](https://xunics.com/api/public/docs) 为准，项目保存了 [2026-11-04 OpenAPI 快照](docs/xunics-openapi.json)。快照描述的是上游协议，其中的 API Key 鉴权由本代理负责。
 
-## 透传约定
+## Controller / Service / DTO 结构
 
-- 查询字符串与请求体按原文转发，不重新序列化 JSON、不转换金额、不新增业务字段，参数校验交给 Xunics。
-- 上游响应体按字节返回，保持 HTTP 状态码，包括 4xx、5xx 和批量部分成功响应。不会套本项目的 `ResultInfo`，也不会将 `msg` 改成 `message`。
-- 传递请求的 `Accept`、`Content-Type`、`Content-Encoding`；调用方的 Authorization 和 Cookie 不转发，上游认证统一使用配置的 API Key。
-- 响应保留 `Content-Type`、`Content-Encoding`、`Retry-After`、追踪和限流等端到端头。连接级头和原 Content-Length 由 HTTP 框架重建；不传递上游 Cookie，跨域头由代理生成。
-- 不跟随上游重定向，不自动重试、不缓存查询、不轮询订单、不自动接受 Steam 报价。调用方按原 API 处理订单状态。
-- `trade_url` 原样传递，由它指定收货 Steam 账号；扣款使用配置 API Key 所属钱包。接入时应仅允许自己的后端通过安全组、网关或内网访问，当前代理未增加调用方鉴权。
+- `XunicsItemController`：商品列表；`XunicsQuoteController`：报价详情。
+- `XunicsOrderController`：报价下单、快速下单、批量下单、订单列表和详情。
+- `XunicsWalletController`：余额、流水和冻结资金。
+- `controller/xunics/param`：独立查询与下单参数类，带 Bean Validation 和 Swagger 注解。
+- `controller/xunics/resp`：商品、贴纸、挂件、订单、批量结果、钱包、分页和错误明细对象。
+- `service` / `service/impl`：每项业务的接口和实现；`integration/xunics/XunicsClient` 只处理 HTTP、鉴权及上游协议。
 
-只有代理未能获得完整上游响应时才生成本地错误，结构沿用 `code/msg/data/error_code/trace_id`，错误码用 `PROXY_` 前缀区分：
+Controller 参照 back 的写法继承 `ResultHelper`，通过 `successResultInfo(service.xxx(param))` 返回 `ResultInfo<具体响应类型>`，不直接接收 ServletRequest 或返回 byte[]。Java 对象使用驼峰属性，JSON/查询字段保留 `market_hash_name`、`external_order_no`、`max_price` 等原协议字段。
 
-| HTTP 状态 | error_code | 含义 |
-| --- | --- | --- |
-| 503 | `PROXY_NOT_CONFIGURED` | 未填写 Xunics API Key |
-| 504 | `PROXY_UPSTREAM_TIMEOUT` | 等待连接或上游响应超时 |
-| 502 | `PROXY_UPSTREAM_UNAVAILABLE` | DNS、TLS、连接断开等网络故障 |
-| 400 | `PROXY_INVALID_PATH` / `PROXY_INVALID_REQUEST` | 本地代理路径或请求格式错误 |
-| 500 | `PROXY_INTERNAL_ERROR` | 本地代理异常 |
+## 返回格式与调用约定
 
-下单发生超时或断连时，订单结果可能未知。重试必须保持 `external_order_no` 和所有参数一致，不要生成新订单号；查询暂时为空也不能证明没有下单。上游返回的 `409 IDEMPOTENCY_CONFLICT` 等错误保持原样。
+成功返回 back 的统一格式，`data` 为原上游 data 对应的类型化对象：
+
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "成功",
+  "data": {"currency": "USD", "balance": "100.00000000", "locked_balance": "0.00000000", "available_balance": "100.00000000", "enabled": true}
+}
+```
+
+失败也返回统一格式，例如上游限流：
+
+```json
+{
+  "success": false,
+  "code": 429,
+  "message": "请求过于频繁",
+  "data": {"traceId": "上游追踪ID", "details": null},
+  "errorCode": "RATE_LIMITED",
+  "retryAfter": 17
+}
+```
+
+- 上游 `msg` 转为失败响应的 `message`，`error_code` 转为 `errorCode`；`trace_id` 位于 `data.traceId` 和 `X-Trace-Id` 响应头，校验明细在 `data.details`。有明细时 `field` 标出首个错误字段。`Retry-After` 响应头保留。
+- 查询和 JSON 请求先绑定参数对象并校验，再调用 Service；本地格式/校验错误返回 HTTP 400。上游 HTTP 错误保留错误状态，响应内容转换为上述格式。
+- 金额和饰品磨损保持字符串表示，不经过浮点运算；分页数据仍为 `items/total/page/size/total_pages`。JSON 空白和字段顺序不再按原字节透传。
+- 批量部分失败属于正常业务结果：外层 `success=true`，逐条查看 `data.items[].accepted/error_code` 和 `data.accepted/rejected`。
+- API Key 仅由服务端配置注入，不接收调用方的上游认证或 Cookie。不自动重试、不跟随重定向、不缓存或轮询订单。未知或非 JSON 的上游响应转换为统一错误。
+- `trade_url` 指定收货 Steam 账号，扣款使用配置 API Key 所属钱包。Xunics 入口尚未增加调用方鉴权，部署时仅允许自己的后端通过安全组、网关或内网访问。
+
+代理错误包括 `PROXY_NOT_CONFIGURED`（503）、`PROXY_UPSTREAM_TIMEOUT`（504）、`PROXY_UPSTREAM_UNAVAILABLE`（502）、`PROXY_INVALID_RESPONSE`（通常 502，非 JSON 上游 HTTP 错误保留其状态码）和 `PROXY_INTERNAL_ERROR`（500）。
+
+下单超时或断连不代表采购失败，重试必须保持 `external_order_no` 和所有参数一致；不得生成新单号重新购买。`IDEMPOTENCY_CONFLICT` 按既有订单查询处理。
+
 Steam 内部接口使用服务密钥，密钥不足 32 字节时拒绝访问。项目包含公开的测试密钥，不能用于保护生产服务。账号权限和凭据密文仍由原后端管理；本服务中的 Steam 会话与未确认事件仅保存在内存，原后端停止轮询后约 45 秒关闭会话。服务重启会丢失会话，需要重新登录。库存接口按 appId、contextId 和游标返回单页，调用方负责处理分页和失败。
 
 服务间地址支持 HTTP 和 HTTPS。当前测试部署只运行 `proxy` 容器，通过 `http://美国服务器IP:8092` 访问；`.env` 设置 `PROXY_BIND_ADDRESS=0.0.0.0`，安全组仅允许国内后端 IP 的 `/32` 来源访问 TCP 8092。HTTP 会明文传输服务密钥及 Steam 登录凭据；正式部署应使用 HTTPS 或加密私网。项目中内置公开的测试密钥，与后端默认测试密钥一致；正式使用必须分别设置相同的随机 `STEAM_INTERNAL_KEY` 和 `STEAM_PROXY_INTERNAL_KEY`。两个服务器应同步系统时间。
@@ -170,6 +198,6 @@ location /api/public/ {
 }
 ```
 
-`./mvnw clean verify` 使用本地 HTTP 模拟上游，覆盖全部 10 个接口、请求/响应字节一致性、参数编码、服务端鉴权注入、上游错误、批量结果、重定向、压缩、超时和断连不重试。基础测试使用内存 H2，不需要真实 MySQL/Redis，也不连接真实采购 API。
+`./mvnw clean verify` 使用本地 HTTP 模拟上游，覆盖全部 10 个接口的独立路由、DTO 字段完整性、参数绑定与校验、金额精度、统一成功/错误格式、服务端鉴权注入、批量结果和超时/断连不重试。基础测试使用内存 H2，不需要真实 MySQL/Redis，也不连接真实采购 API。
 
 产物为 `target/csgo-tradeup-proxy.jar`。日志不会记录 HTTP wire/header 数据。项目没有业务 Mapper，启动时未找到 Mapper 的提示属预期。
