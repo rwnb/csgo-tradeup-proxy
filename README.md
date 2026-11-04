@@ -46,6 +46,67 @@ set +a
 
 ## 测试与打包
 
+### 构建工具与镜像
+
+- 项目使用 Maven Wrapper，首次运行自动下载 Maven 3.9.6；构建和运行环境使用 Eclipse Temurin Java 17。`pom.xml` 中的 `java.version=1.8` 是本项目源码的编译目标，不代表可以用 Java 8 运行整个服务及其依赖。
+- `Dockerfile` 使用多阶段构建：先在 `eclipse-temurin:17-jdk` 中执行 `./mvnw -B -ntp -DskipTests package` 生成 `target/csgo-tradeup-proxy.jar`，再复制到 `eclipse-temurin:17-jre` 镜像，以非 root 用户运行，容器端口为 8092。
+- GitHub Actions 手动构建时，先用 JDK 17 执行 `./mvnw -B -ntp verify`，然后使用 Docker Buildx 构建并推送 `linux/amd64` 镜像，标签格式为 `15565780467w/csgo-tradeup-proxy:run-运行ID-次数`。Dockerfile 中的打包步骤跳过重复测试，实际测试由前面的 Actions 步骤执行。
+- 本机只构建镜像可执行 `docker build -t csgo-tradeup-proxy:local .`；要在 Apple 芯片 Mac 上构建服务器使用的 x86 镜像，可执行 `docker buildx build --platform linux/amd64 -t csgo-tradeup-proxy:local --load .`。
+
+### 方式一：在 GitHub 上构建并推送镜像
+
+1. 先将需要发布的代码提交并推送到 GitHub 分支。Actions 只能构建选中分支已经推送的代码，本机未提交或未推送的修改不会包含在内。
+2. 在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中，配置变量 `DOCKERHUB_USERNAME`（当前部署脚本要求为 `15565780467w`）和 secret `DOCKERHUB_TOKEN`（具有推送权限的 Docker Hub 访问令牌）。
+3. 打开 **Actions → 构建并推送 Docker 镜像 → Run workflow**，选择要发布的分支并运行。
+4. 等待工作流成功，在该次运行的 **Summary** 复制镜像地址，例如 `15565780467w/csgo-tradeup-proxy:run-41603894140-1`，然后按下面的服务器部署步骤操作。
+
+### 方式二：本机命令构建并推送镜像
+
+在项目目录执行，先确保 Docker Desktop 已启动。本方式构建当前工作区内容，包括未提交的修改；构建前的 `verify` 会运行测试，如果测试或登录失败，停止执行后续步骤。下面的时间戳只是用于生成符合现有部署脚本要求的数字标签：
+
+```bash
+cd /Users/w/IdeaProjects/cs/csgo-tradeup-proxy
+./mvnw -B -ntp verify
+docker login
+PROXY_RELEASE_IMAGE="15565780467w/csgo-tradeup-proxy:run-$(date +%Y%m%d%H%M%S)-1"
+docker buildx build --platform linux/amd64 --push -t "$PROXY_RELEASE_IMAGE" .
+printf '部署镜像地址：%s\n' "$PROXY_RELEASE_IMAGE"
+```
+
+复制最后输出的镜像地址，在服务器部署步骤中使用。该方式不需要额外执行 `docker push`；`--push` 会在构建成功后推送镜像。
+
+### 服务器部署步骤
+
+1. 在 GitHub 仓库的 **Actions → 构建并推送 Docker 镜像 → Run workflow** 运行构建，等待成功，在运行结果 Summary 复制完整镜像标签。工作流不会自动部署。
+2. 登录海外服务器，进入 `csgo-tradeup-proxy` 目录；确保目录中有与本次部署相匹配版本的 `compose.yaml`、`scripts/deploy.sh`、`.env.example`，并已安装 Docker 和 Docker Compose。部署脚本要求服务器架构为 `x86_64`。若镜像为私有仓库，先执行 `docker login` 登录有拉取权限的 Docker Hub 账号。
+3. 首次部署时准备 `.env`：可由部署脚本根据 `.env.example` 自动创建，也可先复制并编辑；已有 `.env` 不会被脚本覆盖。按实际环境配置 `STEAM_INTERNAL_KEY`、IPWO 等参数；开放 8092 时需要设置 `PROXY_BIND_ADDRESS=0.0.0.0` 并限制安全组来源。服务密钥应与国内后端的 `STEAM_PROXY_INTERNAL_KEY` 一致。
+4. 用构建成功后得到的完整镜像标签执行部署。下面以一个历史标签演示，实际发布时替换成刚构建的标签：
+
+```bash
+cd /root/csgo-tradeup-proxy
+./scripts/deploy.sh 15565780467w/csgo-tradeup-proxy:run-41603894140-1
+```
+
+脚本会校验配置、拉取指定镜像、重建 proxy 容器并检查本机 `/health`；部署前记录当前镜像标签，失败时可使用旧标签重新执行脚本回退。容器重建会断开内存中的 Steam 会话，账号可能需要重新登录。
+
+部署前可运行以下命令查看当前容器的镜像标签，并保存输出用于回退（首次部署没有容器时可跳过）：
+
+```bash
+docker inspect csgo-tradeup-proxy-proxy-1 --format '{{.Config.Image}}'
+```
+
+部署后检查容器和日志：
+
+```bash
+docker ps --filter name=csgo-tradeup-proxy-proxy
+docker logs --tail=100 csgo-tradeup-proxy-proxy-1
+curl -fsS http://127.0.0.1:8092/health
+```
+
+健康检查只证明进程存活；Steam 登录、IPWO、库存以及国内后端到海外服务的链路仍需分别实测。
+
+### 本地测试
+
 ```bash
 ./mvnw clean verify
 java -jar target/csgo-tradeup-proxy.jar
@@ -53,15 +114,7 @@ java -jar target/csgo-tradeup-proxy.jar
 
 Docker 使用 JDK 17 多阶段构建，并以非 root 用户运行。`.dockerignore` 排除了本机 `.env`、日志和构建产物；项目中的公开测试配置仍会打入镜像。正式环境的私有配置应由服务器环境文件覆盖，并限制文件权限。
 
-GitHub 网页手动构建：在仓库的 Settings → Secrets and variables → Actions 中配置变量 `DOCKERHUB_USERNAME`（Docker Hub 用户名，不是邮箱）和 secret `DOCKERHUB_TOKEN`（建议使用 Docker Hub 访问令牌）。之后在 Actions → “构建并推送 Docker 镜像” → Run workflow 点击运行。每次先运行测试，再构建并推送 `linux/amd64` 镜像；镜像标签在运行结果的 Summary 中显示。该工作流不负责部署或重启服务器。
-
-首次部署时，如 `.env` 不存在，脚本使用 `.env.example` 创建权限受限的文件并使用项目测试配置；不会覆盖已有配置。国内后端默认使用同一测试密钥。服务器还需登录有私有镜像拉取权限的 Docker Hub 账号。Docker 容器内的 `127.0.0.1` 指容器自身，不是服务器宿主机；如使用宿主机的数据库或 Redis，必须填写容器可访问的地址。
-
-```bash
-./scripts/deploy.sh 15565780467w/csgo-tradeup-proxy:run-运行ID-次数
-```
-
-脚本先校验环境，再拉取指定版本、重建服务并检查本机 `/health`。该检查仅表示进程存活，不代表 IPWO、Steam、数据库或跨服务器链路已联通。重建会断开原有内存中的 Steam 会话；健康检查失败不会自动回滚，可以用之前的镜像标签重新运行脚本。
+Docker 容器内的 `127.0.0.1` 指容器自身，不是服务器宿主机；如使用宿主机的数据库或 Redis，必须填写容器可访问的地址。
 
 ```bash
 docker build -t csgo-tradeup-proxy:local .
