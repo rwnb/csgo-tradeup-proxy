@@ -51,29 +51,12 @@ set +a
 - 项目使用 Maven Wrapper，首次运行自动下载 Maven 3.9.6；构建和运行环境使用 Eclipse Temurin Java 17。`pom.xml` 中的 `java.version=1.8` 是本项目源码的编译目标，不代表可以用 Java 8 运行整个服务及其依赖。
 - `Dockerfile` 使用多阶段构建：先在 `eclipse-temurin:17-jdk` 中执行 `./mvnw -B -ntp -DskipTests package` 生成 `target/csgo-tradeup-proxy.jar`，再复制到 `eclipse-temurin:17-jre` 镜像，以非 root 用户运行，容器端口为 8092。
 - GitHub Actions 手动构建时，先用 JDK 17 执行 `./mvnw -B -ntp verify`，然后使用 Docker Buildx 构建并推送 `linux/amd64` 镜像，标签格式为 `15565780467w/csgo-tradeup-proxy:run-运行ID-次数`。Dockerfile 中的打包步骤跳过重复测试，实际测试由前面的 Actions 步骤执行。
-- 本机只构建镜像可执行 `docker build -t csgo-tradeup-proxy:local .`；要在 Apple 芯片 Mac 上构建服务器使用的 x86 镜像，可执行 `docker buildx build --platform linux/amd64 -t csgo-tradeup-proxy:local --load .`。
-
-### 方式一：在 GitHub 上构建并推送镜像
+### 在 GitHub 上构建并推送镜像
 
 1. 先将需要发布的代码提交并推送到 GitHub 分支。Actions 只能构建选中分支已经推送的代码，本机未提交或未推送的修改不会包含在内。
 2. 在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中，配置变量 `DOCKERHUB_USERNAME`（当前部署脚本要求为 `15565780467w`）和 secret `DOCKERHUB_TOKEN`（具有推送权限的 Docker Hub 访问令牌）。
 3. 打开 **Actions → 构建并推送 Docker 镜像 → Run workflow**，选择要发布的分支并运行。
 4. 等待工作流成功，在该次运行的 **Summary** 复制镜像地址，例如 `15565780467w/csgo-tradeup-proxy:run-41603894140-1`，然后按下面的服务器部署步骤操作。
-
-### 方式二：本机命令构建并推送镜像
-
-在项目目录执行，先确保 Docker Desktop 已启动。本方式构建当前工作区内容，包括未提交的修改；构建前的 `verify` 会运行测试，如果测试或登录失败，停止执行后续步骤。下面的时间戳只是用于生成符合现有部署脚本要求的数字标签：
-
-```bash
-cd /Users/w/IdeaProjects/cs/csgo-tradeup-proxy
-./mvnw -B -ntp verify
-docker login
-PROXY_RELEASE_IMAGE="15565780467w/csgo-tradeup-proxy:run-$(date +%Y%m%d%H%M%S)-1"
-docker buildx build --platform linux/amd64 --push -t "$PROXY_RELEASE_IMAGE" .
-printf '部署镜像地址：%s\n' "$PROXY_RELEASE_IMAGE"
-```
-
-复制最后输出的镜像地址，在服务器部署步骤中使用。该方式不需要额外执行 `docker push`；`--push` 会在构建成功后推送镜像。
 
 ### 服务器部署步骤
 
@@ -116,13 +99,7 @@ Docker 使用 JDK 17 多阶段构建，并以非 root 用户运行。`.dockerign
 
 Docker 容器内的 `127.0.0.1` 指容器自身，不是服务器宿主机；如使用宿主机的数据库或 Redis，必须填写容器可访问的地址。
 
-```bash
-docker build -t csgo-tradeup-proxy:local .
-docker run -d --name csgo-tradeup-proxy --restart unless-stopped \
-  --env-file /path/to/proxy.env -p 127.0.0.1:8092:8092 csgo-tradeup-proxy:local
-```
-
-上述 `docker run` 示例绑定服务器本地回环地址，适用于同机访问或已有 HTTPS 入口。跨服务器 HTTP 测试部署使用前述 Compose 配置，无需额外部署其他容器。运行和重启容器会丢失内存中的 Steam 登录会话，需在后台重新登录；持久凭据由原后端保存。
+跨服务器 HTTP 测试部署使用前述 Compose 配置。运行和重启容器会丢失内存中的 Steam 登录会话，需在后台重新登录；持久凭据由原后端保存。
 
 运行 JAR 前同样需导出环境变量，也可通过外部 `config/application.yml` 配置连接信息。测试使用内存 H2 验证数据源，检查统一响应、异常处理、跨域、Swagger 及 Redis 序列化配置，不依赖外部 MySQL/Redis，也不执行真实 Redis 命令。
 
