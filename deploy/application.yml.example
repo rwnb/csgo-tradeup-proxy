@@ -1,0 +1,9 @@
+# 复制到部署工作目录 config/application.yml，填写 api-key 后启动/重启服务。
+server:
+  port: 8092
+xunics:
+  base-url: https://xunics.com/api/public
+  api-key: ""
+  connect-timeout: 5s
+  read-timeout: 120s
+  connection-request-timeout: 5s

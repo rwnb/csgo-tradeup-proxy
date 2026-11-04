@@ -32,6 +32,10 @@
     </appender>
 
 
+    <!-- HTTP 逐字节/请求头日志包含 API Key 和交易链接，禁止记录。 -->
+    <logger name="org.apache.http.wire" level="OFF"/>
+    <logger name="org.apache.http.headers" level="OFF"/>
+
     <!-- 根日志级别和输出 -->
     <root level="INFO">
         <appender-ref ref="CONSOLE" />

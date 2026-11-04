@@ -65,12 +65,14 @@ class InfrastructureIntegrationTest {
     }
 
     @Test
-    void swaggerContainsOnlyTheScaffoldEndpoint() throws Exception {
+    void swaggerContainsHealthAndXunicsEndpoints() throws Exception {
         mvc.perform(get("/v2/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.info.title").value("CSGO Tradeup Proxy API"))
-                .andExpect(jsonPath("$.paths.length()").value(1))
-                .andExpect(jsonPath("$.paths['/health'].get").exists());
+                .andExpect(jsonPath("$.paths['/health'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/public/v1/items'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/public/v1/orders'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/public/v1/orders/quick/batch'].post").exists());
     }
 
     @Test

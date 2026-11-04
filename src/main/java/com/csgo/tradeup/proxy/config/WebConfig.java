@@ -22,6 +22,9 @@ public class WebConfig {
         config.setAllowCredentials(false);
         config.addAllowedMethod("*");
         config.addAllowedHeader("*");
+        config.addExposedHeader("Retry-After");
+        config.addExposedHeader("X-Request-Id");
+        config.addExposedHeader("X-Trace-Id");
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return new CorsFilter(source);
