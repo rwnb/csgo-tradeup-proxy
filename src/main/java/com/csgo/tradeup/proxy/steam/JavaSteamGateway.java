@@ -58,6 +58,15 @@ public class JavaSteamGateway implements SteamGateway {
     }
     @PreDestroy void shutdown() { callbacks.shutdownNow(); authentication.shutdownNow(); communityRetries.shutdownNow(); communityRequests.shutdownNow(); }
 
+    /** CM连接退出不能证明Steam网页凭据已过期，单独报告连接状态。 */
+    static void reportConnectionEnd(Listener listener, boolean online, boolean loggedOff) {
+        String status = online ? "CONNECTION_LOST" : "FAILED";
+        String message = online
+                ? (loggedOff ? "Steam连接已由服务端退出，网页凭据状态未验证" : "Steam连接已断开，网页凭据状态未验证")
+                : (loggedOff ? "Steam登录过程中连接已退出，请重试" : "Steam连接已断开，请稍后重试");
+        try { listener.state(status, message); } catch (Exception ignored) { }
+    }
+
     private final class ClientSession implements Session, IAuthenticator {
         private final Input input;
         private final Listener listener;
@@ -80,8 +89,8 @@ public class JavaSteamGateway implements SteamGateway {
         void connect() {
             subscriptions.add(manager.subscribe(ConnectedCallback.class, ignored -> connected()));
             subscriptions.add(manager.subscribe(LoggedOnCallback.class, this::loggedOn));
-            subscriptions.add(manager.subscribe(LoggedOffCallback.class, ignored -> failed("SESSION_EXPIRED", "Steam会话已退出，请重新登录")));
-            subscriptions.add(manager.subscribe(DisconnectedCallback.class, ignored -> failed(online ? "SESSION_EXPIRED" : "FAILED", "Steam连接已断开，请稍后重试")));
+            subscriptions.add(manager.subscribe(LoggedOffCallback.class, ignored -> connectionEnded(true)));
+            subscriptions.add(manager.subscribe(DisconnectedCallback.class, ignored -> connectionEnded(false)));
             if (!state("CONNECTING", "正在连接Steam"))
                 throw new BizException(ResultCode.CONFLICT, "登录任务已失效或状态保存失败");
             pump = callbacks.scheduleWithFixedDelay(() -> {
@@ -200,6 +209,11 @@ public class JavaSteamGateway implements SteamGateway {
         private void failed(String value, String message) {
             if (closed.get()) return;
             try { listener.state(value, message); } catch (Exception ignored) { }
+            close();
+        }
+        private void connectionEnded(boolean loggedOff) {
+            if (closed.get()) return;
+            reportConnectionEnd(listener, online, loggedOff);
             close();
         }
         private CompletableFuture<String> waitCode(String status, String message) {
