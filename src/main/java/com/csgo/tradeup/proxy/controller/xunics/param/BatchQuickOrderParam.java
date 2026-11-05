@@ -12,7 +12,7 @@ import java.util.List;
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @ApiModel("BatchQuickOrderParam")
-public class BatchQuickOrderParam {
+public class BatchQuickOrderParam extends StrictXunicsBody {
     @ApiModelProperty(value = "Basket contents, 20 items maximum", name = "items", required = true)
     @JsonProperty("items")
     @NotNull

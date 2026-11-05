@@ -10,7 +10,7 @@ import javax.validation.constraints.*;
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @ApiModel("CreateOrderParam")
-public class CreateOrderParam {
+public class CreateOrderParam extends StrictXunicsBody {
     @ApiModelProperty(value = "业务订单号；重试时保持订单号和全部参数一致", name = "external_order_no", required = true)
     @JsonProperty("external_order_no")
     @NotBlank
@@ -21,7 +21,7 @@ public class CreateOrderParam {
     @ApiModelProperty(value = "含全部费用的美元价格上限，使用十进制字符串", name = "max_price", required = true)
     @JsonProperty("max_price")
     @NotBlank
-    @Pattern(regexp = "[0-9]+(\\.[0-9]+)?", message = "必须为十进制金额字符串")
+    @Pattern(regexp = "\\+?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)", message = "必须为十进制金额")
     @DecimalMin(value = "0", inclusive = false)
     private String maxPrice;
 

@@ -200,6 +200,67 @@ class XunicsProxyTest {
     }
 
     @Test
+    void officialPositiveMoneyFormsAndJsonNumbersAreForwardedWithoutLosingValue() throws Exception {
+        for (String amount : Arrays.asList(".5", "+1", "1.")) {
+            mvc.perform(get("/api/public/v1/items").param("market_hash_name", "AK").param("max_price", amount))
+                    .andExpect(status().isOk());
+            Map<String, String> query = new LinkedHashMap<>();
+            org.apache.http.client.utils.URLEncodedUtils.parse(URI.create(takeRequest().uri), "UTF-8")
+                    .forEach(pair -> query.put(pair.getName(), pair.getValue()));
+            assertEquals(amount, query.get("max_price"));
+            String order = QUICK.replace("\"12.00000000\"", "\"" + amount + "\"");
+            mvc.perform(post("/api/public/v1/orders/quick").contentType("application/json").content(order))
+                    .andExpect(status().isOk());
+            assertEquals(amount, mapper.readTree(takeRequest().body).get("max_price").asText());
+        }
+        for (String amount : Arrays.asList("12.34567890", "1234567890123456789012.12345678")) {
+            String numericOrder = QUICK.replace("\"12.00000000\"", amount);
+            mvc.perform(post("/api/public/v1/orders/quick").contentType("application/json").content(numericOrder))
+                    .andExpect(status().isOk());
+            assertEquals(0, new java.math.BigDecimal(amount)
+                    .compareTo(new java.math.BigDecimal(mapper.readTree(takeRequest().body).get("max_price").asText())));
+        }
+
+        for (String amount : Arrays.asList("0", "-1", ".", "1e3")) {
+            mvc.perform(get("/api/public/v1/items").param("market_hash_name", "AK").param("max_price", amount))
+                    .andExpect(status().isBadRequest());
+            String order = QUICK.replace("\"12.00000000\"", "\"" + amount + "\"");
+            mvc.perform(post("/api/public/v1/orders/quick").contentType("application/json").content(order))
+                    .andExpect(status().isBadRequest());
+        }
+        assertTrue(requests.isEmpty());
+    }
+
+    @Test
+    void orderBodiesRejectUnknownFieldsIncludingInsideBatch() throws Exception {
+        String unknown = QUICK.substring(0, QUICK.length() - 1) + ",\"delivery_typo\":\"manual\"}";
+        String quoted = ORDER.substring(0, ORDER.length() - 1)
+                + ",\"quote_id\":\"q_12345678901234567890123456789012\",\"unexpected\":true}";
+        mvc.perform(post("/api/public/v1/orders").contentType("application/json").content(quoted))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/public/v1/orders/quick").contentType("application/json").content(unknown))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/public/v1/orders/quick/batch").contentType("application/json")
+                        .content("{\"items\":[" + unknown + "]}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/public/v1/orders/quick/batch").contentType("application/json")
+                        .content("{\"items\":[" + QUICK + "],\"unexpected\":true}"))
+                .andExpect(status().isBadRequest());
+        assertEquals(0, received.get());
+    }
+
+    @Test
+    void officialSuccessEnvelopeCanOmitDefaultCode() throws Exception {
+        reply.set(new Reply(200, "{\"data\":{\"currency\":\"USD\",\"balance\":\"1.00000000\"}}"));
+        mvc.perform(get("/api/public/v1/wallets/me"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.balance").value("1.00000000"));
+        takeRequest();
+        reply.set(new Reply(200, "{\"code\":null,\"data\":{}}"));
+        mvc.perform(get("/api/public/v1/wallets/me")).andExpect(status().isBadGateway());
+        takeRequest();
+    }
+
+    @Test
     void typedNestedGoodsAndWalletDataRetainOriginalFieldNames() throws Exception {
         reply.set(new Reply(200, "{\"code\":200,\"data\":{\"items\":[{\"quote_id\":\"q_test\",\"price\":\"12.00000000\","
                 + "\"item\":{\"market_hash_name\":\"AK\",\"float_value\":\"0.12345678901234567890\","

@@ -79,7 +79,9 @@ public class XunicsClient {
                 if (envelope == null || !envelope.isObject()) {
                     throw new XunicsProxyException(502, "PROXY_INVALID_RESPONSE", "上游返回格式不正确");
                 }
-                if (status < 200 || status >= 300 || envelope.path("code").asInt(-1) != 200) {
+                // 官方成功响应允许省略 code（默认 200）；显式提供时仍必须是整数 200。
+                JsonNode code = envelope.get("code");
+                if (status < 200 || status >= 300 || (code != null && (!code.isIntegralNumber() || !code.canConvertToInt() || code.asInt() != 200))) {
                     XunicsResponse<JsonNode> failure = mapper.readValue(bytes, new TypeReference<XunicsResponse<JsonNode>>() { });
                     int errorStatus = status >= 400 ? status : failure.getCode() != null
                             && failure.getCode() >= 400 && failure.getCode() <= 599 ? failure.getCode() : 502;

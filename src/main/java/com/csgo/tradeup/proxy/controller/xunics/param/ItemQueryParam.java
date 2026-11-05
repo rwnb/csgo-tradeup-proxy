@@ -41,7 +41,7 @@ public class ItemQueryParam implements XunicsQueryParam {
 
     @ApiModelProperty(value = "含全部费用的美元价格上限，使用十进制字符串", name = "max_price", required = false)
     @JsonProperty("max_price")
-    @Pattern(regexp = "[0-9]+(\\.[0-9]+)?", message = "必须为十进制金额字符串")
+    @Pattern(regexp = "\\+?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)", message = "必须为十进制金额")
     @DecimalMin(value = "0", inclusive = false)
     private String maxPrice;
 
