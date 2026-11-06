@@ -74,6 +74,12 @@ Controller 参照 back 的写法继承 `ResultHelper`，通过 `successResultInf
 
 Steam 内部接口使用服务密钥，密钥不足 32 字节时拒绝访问。项目包含公开的测试密钥，不能用于保护生产服务。账号权限和凭据密文仍由原后端管理；本服务中的 Steam 会话与未确认事件仅保存在内存，原后端停止轮询后约 45 秒关闭会话。服务重启会丢失会话，需要重新登录。库存接口按 appId、contextId 和游标返回单页，调用方负责处理分页和失败。
 
+Steam 采购报价内部接口：`POST /internal/steam/trade/inspect`、`/accept`、`/receipt`，使用同一 `X-Internal-Key` 认证；请求包含 `steamId`、`accessToken`、`offerId`、`marketHashName`，回执查询可选 `tradeId`。响应为 `{state, tradeId, receivedAssetIds, message}`。其中 `ACTIVE` 是报价已通过校验，`ACCEPTED` 是 Steam 报价已接受但未证明到账，`WAITING_CONFIRMATION` 是等待 Steam 确认，`INVALID` 是报价不符合约束或已失效，`UNKNOWN` 是无法安全判断，`RECEIVED` 要求交易回执和库存资产均能精确核对，`RECEIPT_PENDING` 表示仍需核验或人工处理。
+
+接收报价前，proxy 重新查询并要求凭据账号、上游指定的报价 ID、收货方向、我方零付出、单件 CS2 物品和名称匹配。信息不完整时拒绝接收；受保护期、手机确认、接口限流等情况必须继续查询，不能视为到账。接收请求超时表示结果未知，调用方必须先持久化状态、仅查询原报价，**不能自动重发接收请求**。proxy 的进程内防重仅是补充：重启或多实例后不能代替 back 的持久化防重和网络隔离。由于上游未提供可独立核验的卖家 SteamID 和来源资产 ID，此校验依赖上游正确提供的报价 ID，无法独立证明卖家身份。
+
+回执按 Steam 的时间和交易号游标最多查询 10 页；库存最多查询 20 页，查询超时、游标无效、缺少新资产 ID 或没有精确匹配时只返回 `RECEIPT_PENDING`，不能通过库存中的同名物品推定到账。等待交易确认由 Steam 手机或邮件完成，本服务不自动通过手机交易确认。Steam 官方文档列出的 IEconService 凭据为 Web API key；本项目网页 access token 能否用于报价和回执 API、Steam 实际返回字段及 IPWO 链路均未作真实验证，当前只有隔离 mock 测试。
+
 服务间地址支持 HTTP 和 HTTPS。当前测试部署只运行 `proxy` 容器，通过 `http://美国服务器IP:8092` 访问；`.env` 设置 `PROXY_BIND_ADDRESS=0.0.0.0`，安全组仅允许国内后端 IP 的 `/32` 来源访问 TCP 8092。HTTP 会明文传输服务密钥及 Steam 登录凭据；正式部署应使用 HTTPS 或加密私网。项目中内置公开的测试密钥，与后端默认测试密钥一致；正式使用必须分别设置相同的随机 `STEAM_INTERNAL_KEY` 和 `STEAM_PROXY_INTERNAL_KEY`。两个服务器应同步系统时间。
 
 IPWO 默认配置已写入项目，可用 `STEAM_COMMUNITY_PROXY_HOST`、`STEAM_COMMUNITY_PROXY_PORT`、`STEAM_COMMUNITY_PROXY_USERNAME`、`STEAM_COMMUNITY_PROXY_PASSWORD` 覆盖。Steam 服务发现、CM WebSocket 连接、登录认证、交易链接和库存请求均使用此代理；缺少代理配置时拒绝直连。此仓库公开，IPWO 默认凭据和测试密钥对所有人可见。Steam 账号凭据不要写入仓库或访问日志。
