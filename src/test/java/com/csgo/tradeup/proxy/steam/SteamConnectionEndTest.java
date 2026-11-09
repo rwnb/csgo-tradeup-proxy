@@ -9,21 +9,28 @@ class SteamConnectionEndTest {
     @Test void onlineDisconnectDoesNotMarkWebCredentialsExpired() {
         CapturingListener listener = new CapturingListener();
         JavaSteamGateway.reportConnectionEnd(listener, true, false);
-        assertThat(listener.status).isEqualTo("CONNECTION_LOST");
+        assertThat(listener.status).isEqualTo("NETWORK_DISCONNECTED");
         assertThat(listener.message).contains("连接已断开", "网页凭据状态未验证");
     }
 
     @Test void onlineLoggedOffDoesNotAssertWebCredentialsExpired() {
         CapturingListener listener = new CapturingListener();
         JavaSteamGateway.reportConnectionEnd(listener, true, true);
-        assertThat(listener.status).isEqualTo("CONNECTION_LOST");
+        assertThat(listener.status).isEqualTo("LOGGED_OFF");
         assertThat(listener.message).contains("服务端退出", "网页凭据状态未验证");
     }
 
-    @Test void disconnectBeforeLoginIsReportedAsLoginFailure() {
+    @Test void loggedOffBeforeLoginIsTerminalAndNotAReconnectSignal() {
+        CapturingListener listener = new CapturingListener();
+        JavaSteamGateway.reportConnectionEnd(listener, false, true);
+        assertThat(listener.status).isEqualTo("LOGGED_OFF");
+        assertThat(listener.message).contains("登录过程中连接已退出");
+    }
+
+    @Test void disconnectBeforeLoginIsReportedAsNetworkDisconnect() {
         CapturingListener listener = new CapturingListener();
         JavaSteamGateway.reportConnectionEnd(listener, false, false);
-        assertThat(listener.status).isEqualTo("FAILED");
+        assertThat(listener.status).isEqualTo("NETWORK_DISCONNECTED");
         assertThat(listener.message).contains("连接已断开");
     }
 

@@ -60,7 +60,10 @@ public class JavaSteamGateway implements SteamGateway {
 
     /** CM连接退出不能证明Steam网页凭据已过期，单独报告连接状态。 */
     static void reportConnectionEnd(Listener listener, boolean online, boolean loggedOff) {
-        String status = online ? "CONNECTION_LOST" : "FAILED";
+        // 主动登出与网络断开必须区分；后台只对网络断开安排有限次数的自动恢复。
+        // 即便 Steam 主动登出，也不能据此断言单独保存的网页凭据已经过期。
+        // 使用新状态以区分历史 CONNECTION_LOST（旧版也会用它表示服务端登出）。
+        String status = loggedOff ? "LOGGED_OFF" : "NETWORK_DISCONNECTED";
         String message = online
                 ? (loggedOff ? "Steam连接已由服务端退出，网页凭据状态未验证" : "Steam连接已断开，网页凭据状态未验证")
                 : (loggedOff ? "Steam登录过程中连接已退出，请重试" : "Steam连接已断开，请稍后重试");
